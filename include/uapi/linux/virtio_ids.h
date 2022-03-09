@@ -69,6 +69,8 @@
 #define VIRTIO_ID_BT			40 /* virtio bluetooth */
 #define VIRTIO_ID_GPIO			41 /* virtio gpio */
 
+#define VIRTIO_ID_WL           63 /* virtio wayland */
+
 /*
  * Virtio Transitional IDs
  */
