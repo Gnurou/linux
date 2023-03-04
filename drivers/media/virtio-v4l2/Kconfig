@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0+
+# Video driver for virtio
+
+config VIRTIO_V4L2
+	tristate "Virtio V4L2 driver"
+	depends on VIRTIO && VIDEO_DEV
+	depends on VIRTIO_MENU
+	select VIRTIO_DMA_SHARED_BUFFER
+	help
+          Virtual v4l2 driver for virtio.
+

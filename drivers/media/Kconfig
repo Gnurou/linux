@@ -225,6 +225,7 @@ source "drivers/media/usb/Kconfig"
 source "drivers/media/pci/Kconfig"
 source "drivers/media/radio/Kconfig"
 source "drivers/media/virtio/Kconfig"
+source "drivers/media/virtio-v4l2/Kconfig"
 
 if MEDIA_PLATFORM_SUPPORT
 source "drivers/media/platform/Kconfig"

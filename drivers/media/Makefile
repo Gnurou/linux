@@ -27,6 +27,8 @@ obj-$(CONFIG_CEC_CORE) += cec/
 
 obj-$(CONFIG_VIRTIO_VIDEO)  += virtio/
 
+obj-$(CONFIG_VIRTIO_V4L2)  += virtio-v4l2/
+
 #
 # Finally, merge the drivers that require the core
 #
