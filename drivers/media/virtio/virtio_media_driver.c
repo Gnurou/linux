@@ -34,6 +34,10 @@
 #include "session.h"
 #include "virtio_media.h"
 
+#ifndef VIRTIO_ID_MEDIA
+#define VIRTIO_ID_MEDIA 48
+#endif
+
 #define VIRTIO_MEDIA_NUM_EVENT_BUFS 16
 
 /* ID of the SHM region into which MMAP buffer will be mapped. */
