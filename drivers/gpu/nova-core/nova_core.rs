@@ -18,6 +18,7 @@ mod driver;
 mod firmware;
 mod gpu;
 mod regs;
+mod timer;
 mod util;
 
 kernel::module_pci_driver! {

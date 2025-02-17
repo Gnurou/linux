@@ -6,8 +6,10 @@ use kernel::{
 
 use crate::driver::Bar0;
 use crate::regs;
+use crate::timer::Timer;
 use crate::util;
 use core::fmt;
+use core::time::Duration;
 
 macro_rules! define_chipset {
     ({ $($variant:ident = $value:expr),* $(,)* }) =>
@@ -179,6 +181,7 @@ pub(crate) struct Gpu {
     /// MMIO mapping of PCI BAR 0
     bar: Devres<Bar0>,
     fw: Firmware,
+    timer: Timer,
 }
 
 impl Gpu {
@@ -194,6 +197,56 @@ impl Gpu {
             spec.revision
         );
 
-        Ok(pin_init!(Self { spec, bar, fw }))
+        let timer = Timer::new();
+
+        Ok(pin_init!(Self {
+            spec,
+            bar,
+            fw,
+            timer,
+        }))
+    }
+
+    pub(crate) fn test_timer(&self) -> Result<()> {
+        pr_info!("testing timer subdev\n");
+        with_bar!(self.bar, |b| {
+            pr_info!("current timestamp: {}\n", self.timer.read(b))
+        })?;
+
+        if !matches!(
+            self.timer
+                .wait_on(&self.bar, Duration::from_millis(10), || Some(())),
+            Ok(())
+        ) {
+            pr_crit!("timer test failure\n");
+        }
+
+        let t1 = with_bar!(self.bar, |b| {
+            pr_info!("timestamp after immediate exit: {}\n", self.timer.read(b));
+            self.timer.read(b)
+        })?;
+
+        if self
+            .timer
+            .wait_on(&self.bar, Duration::from_millis(10), || Option::<()>::None)
+            != Err(ETIMEDOUT)
+        {
+            pr_crit!("timer test 2 failure\n");
+        }
+
+        let t2 = with_bar!(self.bar, |b| self.timer.read(b))?;
+        if t2 - t1 < Duration::from_millis(10) {
+            pr_crit!("timer test 3 failure\n");
+        }
+
+        with_bar!(self.bar, |b| {
+            pr_info!(
+                "timestamp after timeout: {} ({:?})\n",
+                self.timer.read(b),
+                t2 - t1
+            );
+        })?;
+
+        Ok(())
     }
 }
