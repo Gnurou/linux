@@ -5,6 +5,7 @@ use kernel::{
 };
 
 use crate::driver::Bar0;
+use crate::falcon::{GspFalcon, Sec2Falcon};
 use crate::regs;
 use crate::timer::Timer;
 use crate::util;
@@ -198,6 +199,18 @@ impl Gpu {
         );
 
         let timer = Timer::new();
+        let _gsp_falcon = GspFalcon::new(
+            pdev,
+            spec.chipset,
+            &bar,
+            if spec.chipset > Chipset::GA100 {
+                true
+            } else {
+                false
+            },
+        )?;
+
+        let _sec2_falcon = Sec2Falcon::new(pdev, spec.chipset, &bar, false)?;
 
         Ok(pin_init!(Self {
             spec,

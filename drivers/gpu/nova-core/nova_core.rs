@@ -15,6 +15,7 @@ mod macros {
 }
 
 mod driver;
+mod falcon;
 mod firmware;
 mod gpu;
 mod regs;
