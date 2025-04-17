@@ -30,8 +30,8 @@ pub(crate) const FIRMWARE_VERSION: &str = "570.144";
 pub(crate) struct Firmware {
     booter_load: Sec2Firmware,
     booter_unload: Sec2Firmware,
-    bootloader: RiscvFirmware,
-    gsp: firmware::Firmware,
+    pub bootloader: RiscvFirmware,
+    pub gsp: firmware::Firmware,
 }
 
 impl Firmware {
