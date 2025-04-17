@@ -6,6 +6,7 @@
 use core::marker::PhantomData;
 use core::mem::size_of;
 
+use booter::BooterFirmware;
 use kernel::device;
 use kernel::firmware;
 use kernel::prelude::*;
@@ -13,10 +14,13 @@ use kernel::str::CString;
 use kernel::transmute::FromBytes;
 
 use crate::dma::DmaObject;
+use crate::driver::Bar0;
 use crate::falcon::FalconFirmware;
+use crate::falcon::{sec2::Sec2, Falcon};
 use crate::gpu;
 use crate::gpu::Chipset;
 
+pub(crate) mod booter;
 pub(crate) mod fwsec;
 
 pub(crate) const FIRMWARE_VERSION: &str = "535.113.01";
@@ -24,14 +28,22 @@ pub(crate) const FIRMWARE_VERSION: &str = "535.113.01";
 /// Structure encapsulating the firmware blobs required for the GPU to operate.
 #[expect(dead_code)]
 pub(crate) struct Firmware {
-    booter_load: firmware::Firmware,
-    booter_unload: firmware::Firmware,
+    /// Runs on the sec2 falcon engine to load and start the GSP bootloader.
+    booter_loader: BooterFirmware,
+    /// Runs on the sec2 falcon engine to stop and unload a running GSP firmware.
+    booter_unloader: BooterFirmware,
     bootloader: firmware::Firmware,
     gsp: firmware::Firmware,
 }
 
 impl Firmware {
-    pub(crate) fn new(dev: &device::Device, chipset: Chipset, ver: &str) -> Result<Firmware> {
+    pub(crate) fn new(
+        dev: &device::Device<device::Bound>,
+        sec2: &Falcon<Sec2>,
+        bar: &Bar0,
+        chipset: Chipset,
+        ver: &str,
+    ) -> Result<Firmware> {
         let mut chip_name = CString::try_from_fmt(fmt!("{chipset}"))?;
         chip_name.make_ascii_lowercase();
         let chip_name = &*chip_name;
@@ -42,8 +54,10 @@ impl Firmware {
         };
 
         Ok(Firmware {
-            booter_load: request("booter_load")?,
-            booter_unload: request("booter_unload")?,
+            booter_loader: request("booter_load")
+                .and_then(|fw| BooterFirmware::new(dev, &fw, sec2, bar))?,
+            booter_unloader: request("booter_unload")
+                .and_then(|fw| BooterFirmware::new(dev, &fw, sec2, bar))?,
             bootloader: request("bootloader")?,
             gsp: request("gsp")?,
         })
@@ -179,7 +193,6 @@ struct BinFirmware<'a> {
     fw: &'a [u8],
 }
 
-#[expect(dead_code)]
 impl<'a> BinFirmware<'a> {
     /// Interpret `fw` as a firmware image starting with a [`BinHdr`], and returns the
     /// corresponding [`BinFirmware`] that can be used to extract its payload.
