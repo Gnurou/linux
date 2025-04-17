@@ -12,6 +12,7 @@ use kernel::firmware;
 use kernel::prelude::*;
 use kernel::str::CString;
 use kernel::transmute::FromBytes;
+use riscv::RiscvFirmware;
 
 use crate::dma::DmaObject;
 use crate::driver::Bar0;
@@ -22,6 +23,7 @@ use crate::gpu::Chipset;
 
 pub(crate) mod booter;
 pub(crate) mod fwsec;
+pub(crate) mod riscv;
 
 pub(crate) const FIRMWARE_VERSION: &str = "535.113.01";
 
@@ -32,7 +34,8 @@ pub(crate) struct Firmware {
     booter_loader: BooterFirmware,
     /// Runs on the sec2 falcon engine to stop and unload a running GSP firmware.
     booter_unloader: BooterFirmware,
-    bootloader: firmware::Firmware,
+    /// GSP bootloader, verifies the GSP firmware before loading and running it.
+    gsp_bootloader: RiscvFirmware,
     gsp: firmware::Firmware,
 }
 
@@ -58,7 +61,7 @@ impl Firmware {
                 .and_then(|fw| BooterFirmware::new(dev, &fw, sec2, bar))?,
             booter_unloader: request("booter_unload")
                 .and_then(|fw| BooterFirmware::new(dev, &fw, sec2, bar))?,
-            bootloader: request("bootloader")?,
+            gsp_bootloader: request("bootloader").and_then(|fw| RiscvFirmware::new(dev, &fw))?,
             gsp: request("gsp")?,
         })
     }
