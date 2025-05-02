@@ -27,7 +27,7 @@ pub(crate) mod fwsec;
 pub(crate) mod gsp;
 pub(crate) mod riscv;
 
-pub(crate) const FIRMWARE_VERSION: &str = "535.113.01";
+pub(crate) const FIRMWARE_VERSION: &str = "570.144";
 
 /// Ad-hoc and temporary module to extract sections from ELF images.
 ///
