@@ -377,6 +377,16 @@ impl<E: FalconEngine + 'static> Falcon<E> {
         })
     }
 
+    /// Reset DMA-related registers.
+    /// TODO: Shall we move this into falcon.reset() itself?
+    /// TODO: Should we also move the write to "NV_PFALCON_FBIF_TRANSCFG"
+    ///       from dma_load() into here as well?
+    pub(crate) fn dma_reset(&self, bar: &Bar0) -> Result<()> {
+        regs::NV_PFALCON_FBIF_CTL::alter(bar, &E::ID, |v| v.set_allow_phys_no_ctx(true));
+        regs::NV_PFALCON_FALCON_DMACTL::default().write(bar, &E::ID);
+        Ok(())
+    }
+
     /// Wait for memory scrubbing to complete.
     fn reset_wait_mem_scrubbing(&self, bar: &Bar0) -> Result {
         // TIMEOUT: memory scrubbing should complete in less than 20ms.
@@ -527,8 +537,7 @@ impl<E: FalconEngine + 'static> Falcon<E> {
 
     /// Perform a DMA load into `IMEM` and `DMEM` of `fw`, and prepare the falcon to run it.
     pub(crate) fn dma_load<F: FalconFirmware<Target = E>>(&self, bar: &Bar0, fw: &F) -> Result {
-        regs::NV_PFALCON_FBIF_CTL::alter(bar, &E::ID, |v| v.set_allow_phys_no_ctx(true));
-        regs::NV_PFALCON_FALCON_DMACTL::default().write(bar, &E::ID);
+        self.dma_reset(bar)?;
         regs::NV_PFALCON_FBIF_TRANSCFG::alter(bar, &E::ID, 0, |v| {
             v.set_target(FalconFbifTarget::CoherentSysmem)
                 .set_mem_type(FalconFbifMemType::Physical)
