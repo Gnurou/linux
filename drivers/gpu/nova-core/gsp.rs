@@ -5,6 +5,7 @@ mod fw;
 
 pub(crate) mod cmdq;
 pub(crate) mod commands;
+pub(crate) mod sequencer;
 
 use kernel::alloc::flags::GFP_KERNEL;
 use kernel::bindings;

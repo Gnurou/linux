@@ -15,7 +15,7 @@ use crate::firmware::{
     FIRMWARE_VERSION,
 };
 use crate::gpu::Chipset;
-use crate::gsp::GspFwWprMeta;
+use crate::gsp::{sequencer::GspSequencer, GspFwWprMeta};
 use crate::regs;
 use crate::util;
 use crate::vbios::Vbios;
@@ -129,6 +129,8 @@ impl super::Gsp {
         let libos_handle = self.libos_dma_handle();
 
         gsp_falcon.reset(bar)?;
+        // Should we actually boot here? IIUC there is nothing loaded in the falcon, so we just
+        // want to set the MBOX registers to the correct value?
         let (mbox0, mbox1) = gsp_falcon.boot(
             bar,
             Some(libos_handle as u32),
@@ -175,6 +177,18 @@ impl super::Gsp {
         })?;
 
         dev_dbg!(dev, "RISC-V active? {}\n", gsp_falcon.is_riscv_active(bar)?,);
+
+        // Create and run the GSP sequencer
+        GspSequencer::run(
+            self.cmdq(),
+            &gsp_fw,
+            libos_handle,
+            gsp_falcon,
+            sec2_falcon,
+            pdev.as_ref(),
+            bar,
+            Delta::from_secs(10),
+        )?;
 
         Ok(())
     }
