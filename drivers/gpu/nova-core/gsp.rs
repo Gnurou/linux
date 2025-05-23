@@ -18,12 +18,13 @@ use kernel::{dma_read, dma_write};
 
 use crate::dma::DmaObject;
 use crate::driver::Bar0;
-use crate::falcon::{gsp::Gsp, sec2::Sec2, Falcon};
 use crate::fb::FbLayout;
 use crate::firmware::Firmware;
 use crate::nvfw::r570_144 as fw;
 use crate::regs::NV_PGSP_QUEUE_HEAD;
 use crate::sbuffer::{SBuffer, SBufferIteratorMut};
+
+pub(crate) mod sequencer;
 
 pub(crate) const GSP_PAGE_SHIFT: usize = 12;
 pub(crate) const GSP_PAGE_SIZE: usize = 1 << GSP_PAGE_SHIFT;

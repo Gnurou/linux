@@ -360,6 +360,31 @@ impl Gpu {
             gsp_falcon.is_riscv_active(&bar)?,
         );
 
+        let libos_dma_handle = libos.libos_dma_handle();
+
+        // Create and run the GSP sequencer
+        match gsp::sequencer::GspSequencer::new(
+            &mut libos.cmdq,
+            &fw,
+            libos_dma_handle,
+            &gsp_falcon,
+            &sec2_falcon,
+            pdev.as_ref(),
+            &bar,
+            Delta::from_secs(10),
+        ) {
+            Ok(sequencer) => {
+                if let Err(e) = sequencer.run() {
+                    pr_err!("Error running CPU sequencer: {:?}\n", e);
+                    return Err(e);
+                }
+            }
+            Err(e) => {
+                pr_err!("Error creating CPU sequencer: {:?}\n", e);
+                return Err(e);
+            }
+        }
+
         Ok(pin_init!(Self {
             spec,
             bar: devres_bar,
