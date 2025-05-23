@@ -19,7 +19,7 @@ pub(crate) const fn to_lowercase_bytes<const N: usize>(s: &str) -> [u8; N] {
 pub(crate) const fn const_bytes_to_str(bytes: &[u8]) -> &str {
     match core::str::from_utf8(bytes) {
         Ok(string) => string,
-        Err(_) => kernel::build_error!("Bytes are not valid UTF-8."),
+        Err(_) => panic!("Bytes are not valid UTF-8."),
     }
 }
 
