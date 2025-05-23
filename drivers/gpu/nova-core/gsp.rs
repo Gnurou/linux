@@ -2,6 +2,7 @@
 
 mod boot;
 mod fw;
+mod sequencer;
 
 pub(crate) use fw::{GspFwWprMeta, LibosParams};
 
