@@ -19,7 +19,7 @@ use crate::firmware::{
 };
 use crate::gpu::Chipset;
 use crate::gsp::commands::{build_registry, set_system_info};
-use crate::gsp::GspFwWprMeta;
+use crate::gsp::{sequencer::GspSequencer, GspFwWprMeta};
 use crate::regs;
 use crate::vbios::Vbios;
 
@@ -203,6 +203,18 @@ impl super::Gsp {
             "RISC-V active? {}\n",
             gsp_falcon.is_riscv_active(bar),
         );
+
+        // Create and run the GSP sequencer
+        GspSequencer::run(
+            &mut self.cmdq,
+            &gsp_fw,
+            libos_handle,
+            gsp_falcon,
+            sec2_falcon,
+            pdev.as_ref(),
+            bar,
+            Delta::from_secs(10),
+        )?;
 
         Ok(())
     }
