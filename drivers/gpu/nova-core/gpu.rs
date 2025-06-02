@@ -258,8 +258,8 @@ impl Gpu {
                 Err(EIO)
             }
             (wpr2_lo, wpr2_hi) => {
-                dev_dbg!(dev, "WPR2: {:#x}-{:#x}\n", wpr2_lo, wpr2_hi);
-                dev_dbg!(dev, "GPU instance built\n");
+                dev_info!(dev, "WPR2: {:#x}-{:#x}\n", wpr2_lo, wpr2_hi);
+                dev_info!(dev, "GPU instance built\n");
 
                 Ok(())
             }
