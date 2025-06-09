@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
 
-use kernel::{device, devres::Devres, error::code::*, pci, prelude::*, sync::Arc, time::Delta};
+use kernel::{
+    c_str, device, devres::Devres, error::code::*, pci, prelude::*, sync::Arc, time::Delta,
+};
 
 use crate::driver::Bar0;
 use crate::falcon::{gsp::Gsp, sec2::Sec2, Falcon};
@@ -16,7 +18,11 @@ use crate::regs;
 use crate::util;
 use crate::vbios::Vbios;
 
+use crate::debugfs::NovaDebugfs;
 use core::fmt;
+use kernel::sync::Mutex;
+
+static mut NOVA_DEBUGFS: Option<Arc<Mutex<NovaDebugfs>>> = None;
 
 macro_rules! define_chipset {
     ({ $($variant:ident = $value:expr),* $(,)* }) =>
@@ -189,6 +195,47 @@ impl PinnedDrop for Gpu {
 }
 
 impl Gpu {
+    /// Initialize debugfs for Nova GPU driver.
+    ///
+    /// Creates the debugfs directory and log files for GSP debugging.
+    fn init_debugfs(libos: &crate::gsp::GspMemObjects) {
+        // debugfs files for GSP log
+        unsafe {
+            if (*core::ptr::addr_of!(NOVA_DEBUGFS)).is_none() {
+                match NovaDebugfs::new("nova") {
+                    Ok(debugfs) => {
+                        match Arc::pin_init(
+                            Mutex::new(
+                                debugfs,
+                                c_str!("nova_debugfs"),
+                                kernel::static_lock_class!(),
+                            ),
+                            GFP_KERNEL,
+                        ) {
+                            Ok(arc) => {
+                                NOVA_DEBUGFS = Some(arc);
+                                pr_info!("Created nova debugfs directory\n");
+                            }
+                            Err(e) => {
+                                pr_err!("Failed to create Arc for debugfs: {:?}\n", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        pr_err!("Failed to create debugfs: {:?}\n", e);
+                    }
+                }
+            }
+
+            if let Some(ref debugfs_arc) = NOVA_DEBUGFS {
+                let mut debugfs = debugfs_arc.lock();
+                if let Err(e) = debugfs.create_log_files(libos) {
+                    pr_err!("Failed to create debugfs log files: {:?}\n", e);
+                }
+            }
+        }
+    }
+
     /// Helper function to load and run the FWSEC-FRTS firmware and confirm that it has properly
     /// created the WPR2 region.
     ///
@@ -350,6 +397,7 @@ impl Gpu {
             gsp_falcon.is_riscv_active(&bar)?,
         );
 
+        Self::init_debugfs(&libos);
         let libos_dma_handle = libos.libos_dma_handle();
 
         // Create and run the GSP sequencer

@@ -2,6 +2,7 @@
 
 //! Nova Core GPU Driver
 
+mod debugfs;
 mod dma;
 mod driver;
 mod falcon;
