@@ -55,6 +55,7 @@ mod macros {
     }
 }
 
+mod debugfs;
 mod dma;
 mod driver;
 mod falcon;
