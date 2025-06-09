@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: GPL-2.0
 
+use kernel::c_str;
 use kernel::device;
 use kernel::dma::CoherentAllocation;
 use kernel::dma_write;
 use kernel::io::poll::read_poll_timeout;
 use kernel::pci;
 use kernel::prelude::*;
+use kernel::sync::Arc;
+use kernel::sync::Mutex;
 use kernel::time::Delta;
 
+use crate::debugfs::NovaDebugfs;
 use crate::driver::Bar0;
 use crate::falcon::{gsp::Gsp, sec2::Sec2, Falcon};
 use crate::fb::FbLayout;
@@ -23,6 +27,8 @@ use crate::gsp::{sequencer::GspSequencer, GspFwWprMeta};
 use crate::regs;
 use crate::util;
 use crate::vbios::Vbios;
+
+static mut NOVA_DEBUGFS: Option<Arc<Mutex<NovaDebugfs>>> = None;
 
 impl super::Gsp {
     /// Helper function to load and run the FWSEC-FRTS firmware and confirm that it has properly
@@ -199,6 +205,7 @@ impl super::Gsp {
             Delta::from_secs(5),
         )?;
 
+        self.init_debugfs();
         dev_dbg!(
             pdev.as_ref(),
             "RISC-V active? {}\n",
@@ -226,5 +233,46 @@ impl super::Gsp {
         );
 
         Ok(())
+    }
+
+    /// Initialize debugfs for Nova GPU driver.
+    ///
+    /// Creates the debugfs directory and log files for GSP debugging.
+    fn init_debugfs(&self) {
+        // debugfs files for GSP log
+        unsafe {
+            if (*core::ptr::addr_of!(NOVA_DEBUGFS)).is_none() {
+                match NovaDebugfs::new("nova") {
+                    Ok(debugfs) => {
+                        match Arc::pin_init(
+                            Mutex::new(
+                                debugfs,
+                                c_str!("nova_debugfs"),
+                                kernel::static_lock_class!(),
+                            ),
+                            GFP_KERNEL,
+                        ) {
+                            Ok(arc) => {
+                                NOVA_DEBUGFS = Some(arc);
+                                pr_info!("Created nova debugfs directory\n");
+                            }
+                            Err(e) => {
+                                pr_err!("Failed to create Arc for debugfs: {:?}\n", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        pr_err!("Failed to create debugfs: {:?}\n", e);
+                    }
+                }
+            }
+
+            if let Some(ref debugfs_arc) = NOVA_DEBUGFS {
+                let mut debugfs = debugfs_arc.lock();
+                if let Err(e) = debugfs.create_log_files(self) {
+                    pr_err!("Failed to create debugfs log files: {:?}\n", e);
+                }
+            }
+        }
     }
 }

@@ -2,6 +2,8 @@
 
 mod boot;
 
+use core::ops::Deref;
+
 use kernel::device;
 use kernel::dma::CoherentAllocation;
 use kernel::dma::DmaAddress;
@@ -34,9 +36,9 @@ const RM_LOG_BUFFER_NUM_PAGES: usize = 0x10;
 #[pin_data]
 pub(crate) struct Gsp {
     pub(crate) libos: CoherentAllocation<LibosMemoryRegionInitArgument>,
-    loginit: LogBuffer,
-    logintr: LogBuffer,
-    logrm: LogBuffer,
+    pub(crate) loginit: LogBuffer,
+    pub(crate) logintr: LogBuffer,
+    pub(crate) logrm: LogBuffer,
     pub(crate) cmdq: Cmdq,
     rmargs: CoherentAllocation<GspArgumentsCached>,
 }
@@ -74,7 +76,7 @@ impl<const NUM_PAGES: usize> PteArray<NUM_PAGES> {
 /// then pp points to index into the buffer where the next logging entry will
 /// be written. Therefore, the logging data is valid if:
 ///   1 <= pp < sizeof(buffer)/sizeof(u64)
-struct LogBuffer(CoherentAllocation<u8>);
+pub(crate) struct LogBuffer(CoherentAllocation<u8>);
 
 impl LogBuffer {
     fn new(dev: &device::Device<device::Bound>) -> Result<Self> {
@@ -96,6 +98,14 @@ impl LogBuffer {
         };
 
         Ok(obj)
+    }
+}
+
+impl Deref for LogBuffer {
+    type Target = CoherentAllocation<u8>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
