@@ -151,6 +151,7 @@ impl Firmware {
 
         let gsp_sigs_section = match chipset.arch() {
             Architecture::Ampere => ".fwsignature_ga10x",
+            Architecture::Ada => ".fwsignature_ad10x",
             _ => return Err(ENOTSUPP),
         };
         let gsp_sigs = elf::elf64_section(gsp_fw.data(), gsp_sigs_section)
