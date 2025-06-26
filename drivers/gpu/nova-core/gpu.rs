@@ -8,6 +8,7 @@ use crate::fb::SysmemFlush;
 use crate::gfw;
 use crate::gsp::Gsp;
 use crate::regs;
+
 use core::fmt;
 
 macro_rules! define_chipset {

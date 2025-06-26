@@ -7,8 +7,15 @@ use r570_144 as bindings;
 
 use core::ops::Range;
 
+use crate::fb::FbLayout;
+use crate::firmware::gsp::GspFirmware;
+use kernel::device;
 use kernel::dma::CoherentAllocation;
+use kernel::dma_write;
+use kernel::prelude::*;
 use kernel::ptr::Alignable;
+use kernel::ptr::Alignment;
+use kernel::sizes::SZ_128K;
 use kernel::sizes::SZ_1M;
 use kernel::transmute::AsBytes;
 use kernel::transmute::FromBytes;
@@ -139,3 +146,61 @@ impl LibosMemoryRegionInitArgument {
 /// addresses of the GSP bootloader and firmware.
 #[repr(transparent)]
 pub(crate) struct GspFwWprMeta(bindings::GspFwWprMeta);
+
+// SAFETY: Padding is explicit and will not contain uninitialized data.
+unsafe impl AsBytes for GspFwWprMeta {}
+
+// SAFETY: This struct only contains integer types for which all bit patterns
+// are valid.
+unsafe impl FromBytes for GspFwWprMeta {}
+
+impl GspFwWprMeta {
+    pub(crate) fn new(
+        dev: &device::Device<device::Bound>,
+        gsp_firmware: &GspFirmware,
+        fb_layout: &FbLayout,
+    ) -> Result<CoherentAllocation<Self>> {
+        let wpr_meta =
+            CoherentAllocation::<GspFwWprMeta>::alloc_coherent(dev, 1, GFP_KERNEL | __GFP_ZERO)?;
+        dma_write!(
+            wpr_meta[0] = GspFwWprMeta(bindings::GspFwWprMeta {
+                magic: bindings::GSP_FW_WPR_META_MAGIC as u64,
+                revision: u64::from(bindings::GSP_FW_WPR_META_REVISION),
+                sysmemAddrOfRadix3Elf: gsp_firmware.radix3_dma_handle(),
+                sizeOfRadix3Elf: gsp_firmware.size as u64,
+                sysmemAddrOfBootloader: gsp_firmware.bootloader.ucode.dma_handle(),
+                sizeOfBootloader: gsp_firmware.bootloader.ucode.size() as u64,
+                bootloaderCodeOffset: u64::from(gsp_firmware.bootloader.code_offset),
+                bootloaderDataOffset: u64::from(gsp_firmware.bootloader.data_offset),
+                bootloaderManifestOffset: u64::from(gsp_firmware.bootloader.manifest_offset),
+                __bindgen_anon_1: bindings::GspFwWprMeta__bindgen_ty_1 {
+                    __bindgen_anon_1: bindings::GspFwWprMeta__bindgen_ty_1__bindgen_ty_1 {
+                        sysmemAddrOfSignature: gsp_firmware.signatures.dma_handle(),
+                        sizeOfSignature: gsp_firmware.signatures.size() as u64,
+                    }
+                },
+                gspFwRsvdStart: fb_layout.heap.start,
+                nonWprHeapOffset: fb_layout.heap.start,
+                nonWprHeapSize: fb_layout.heap.end - fb_layout.heap.start,
+                gspFwWprStart: fb_layout.wpr2.start,
+                gspFwHeapOffset: fb_layout.wpr2_heap.start,
+                gspFwHeapSize: fb_layout.wpr2_heap.end - fb_layout.wpr2_heap.start,
+                gspFwOffset: fb_layout.elf.start,
+                bootBinOffset: fb_layout.boot.start,
+                frtsOffset: fb_layout.frts.start,
+                frtsSize: fb_layout.frts.end - fb_layout.frts.start,
+                gspFwWprEnd: fb_layout
+                    .vga_workspace
+                    .start
+                    .align_down(Alignment::new::<SZ_128K>()),
+                gspFwHeapVfPartitionCount: fb_layout.vf_partition_count,
+                fbSize: fb_layout.fb.end - fb_layout.fb.start,
+                vgaWorkspaceOffset: fb_layout.vga_workspace.start,
+                vgaWorkspaceSize: fb_layout.vga_workspace.end - fb_layout.vga_workspace.start,
+                ..Default::default()
+            })
+        )?;
+
+        Ok(wpr_meta)
+    }
+}

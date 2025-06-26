@@ -14,6 +14,7 @@ use crate::firmware::{
     FIRMWARE_VERSION,
 };
 use crate::gpu::Chipset;
+use crate::gsp::GspFwWprMeta;
 use crate::regs;
 use crate::vbios::Vbios;
 
@@ -131,6 +132,8 @@ impl super::Gsp {
             sec2_falcon,
             bar,
         )?;
+
+        let _wpr_meta = GspFwWprMeta::new(dev, &gsp_fw, &fb_layout)?;
 
         Ok(())
     }
