@@ -11,7 +11,7 @@ use crate::firmware::{Firmware, FIRMWARE_VERSION};
 use crate::gfw;
 use crate::gsp;
 use crate::gsp::GspMemObjects;
-use crate::gsp::commands::gsp_init_done;
+use crate::gsp::commands::{get_gsp_info, gsp_init_done};
 use crate::regs;
 use crate::util;
 use crate::vbios::Vbios;
@@ -365,6 +365,12 @@ impl Gpu {
         )?;
 
         gsp_init_done(&mut libos.cmdq, Delta::from_secs(10))?;
+        let info = get_gsp_info(&mut libos.cmdq, bar)?;
+        dev_info!(
+            pdev.as_ref(),
+            "GPU name: {}\n",
+            util::str_from_null_terminated(&info.gpu_name)
+        );
 
         Ok(pin_init!(Self {
             spec,
