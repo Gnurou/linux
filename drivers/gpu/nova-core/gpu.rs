@@ -10,7 +10,7 @@ use crate::fb::SysmemFlush;
 use crate::firmware::fwsec::{FwsecCommand, FwsecFirmware};
 use crate::firmware::{Firmware, FIRMWARE_VERSION};
 use crate::gfw;
-use crate::gsp;
+use crate::gsp::{self, GspMemObjects};
 use crate::nvfw::r570_144 as fw;
 use crate::regs;
 use crate::util;
@@ -177,6 +177,7 @@ pub(crate) struct Gpu {
     /// PCIE into system memory, via sysmembar (A GPU-initiated HW memory-barrier operation).
     sysmem_flush: SysmemFlush,
     wpr_meta: CoherentAllocation<fw::GspFwWprMeta>,
+    libos: GspMemObjects,
 }
 
 #[pinned_drop]
@@ -317,7 +318,7 @@ impl Gpu {
 
         Self::run_fwsec_frts(pdev.as_ref(), &gsp_falcon, bar, &bios, &fb_layout)?;
 
-        let libos = gsp::GspMemObjects::new(pdev)?;
+        let mut libos = gsp::GspMemObjects::new(pdev, bar)?;
         let _libos_handle = libos.libos_dma_handle();
         let wpr_meta = gsp::build_wpr_meta(pdev.as_ref(), &fw, &fb_layout)?;
         let _wpr_handle = wpr_meta.dma_handle();
@@ -328,6 +329,7 @@ impl Gpu {
             fw,
             sysmem_flush,
             wpr_meta,
+            libos,
         }))
     }
 }
