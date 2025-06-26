@@ -88,6 +88,45 @@ pub(crate) trait GspCommand: GspCommandElement {
     const FUNCTION: u32;
 }
 
+pub(crate) struct GspStaticConfigInfo {
+    pub gpu_name: [u8; 40],
+}
+
+impl GspMessageElement for GspStaticConfigInfo {
+    fn new_from_sbuf(sbuf: &SBuffer<'_>) -> Result<Self> {
+        if size_of::<fw::GspStaticConfigInfo_t>() < sbuf.total_bytes {
+            return Err(EINVAL);
+        }
+
+        // SAFETY: We have confirmed the static info fits in the SBuffer
+        let static_info = unsafe {
+            let static_info_ptr = sbuf.as_ptr::<fw::GspStaticConfigInfo_t>(0)?;
+            &*static_info_ptr
+        };
+
+        let gpu_name_str = static_info
+            .gpuNameString
+            .get(
+                0..=static_info
+                    .gpuNameString
+                    .iter()
+                    .position(|&b| b == 0)
+                    .unwrap_or(static_info.gpuNameString.len() - 1),
+            )
+            .and_then(|bytes| CStr::from_bytes_with_nul(bytes).ok())
+            .and_then(|cstr| cstr.to_str().ok())
+            .unwrap_or("invalid utf8");
+
+        let mut gpu_name = [0u8; 40];
+        let bytes = gpu_name_str.as_bytes();
+        let copy_len = core::cmp::min(bytes.len(), gpu_name.len());
+        gpu_name[..copy_len].copy_from_slice(&bytes[..copy_len]);
+        gpu_name[copy_len] = b'\0';
+
+        Ok(GspStaticConfigInfo { gpu_name })
+    }
+}
+
 // This next section contains constants and structures hand-coded from the GSP
 // headers We could replace these with bindgen versions, but that's a bit of a
 // pain because they basically end up pulling in the world (ie. definitions for
@@ -490,6 +529,19 @@ impl GspCmdq {
         self.receive_wait_ignore::<EmptyCmd>(timeout, fw::NV_VGPU_MSG_EVENT_GSP_INIT_DONE)
             .map(|_| ())
     }
+
+    pub(crate) fn get_gsp_info(&mut self, bar: &Bar0) -> Result<GspStaticConfigInfo> {
+        self.send(
+            bar,
+            &GetGspStaticInfo(EmptyCmd {
+                size: size_of::<fw::GspStaticConfigInfo_t>(),
+            }),
+        )?;
+        self.receive_wait::<GspStaticConfigInfo>(
+            Delta::from_secs(5),
+            fw::NV_VGPU_MSG_FUNCTION_GET_GSP_STATIC_INFO,
+        )
+    }
 }
 
 struct EmptyCmd {
@@ -514,6 +566,20 @@ impl GspCommandElement for EmptyCmd {
 
         Ok(())
     }
+}
+
+struct GetGspStaticInfo(EmptyCmd);
+impl GspCommandElement for GetGspStaticInfo {
+    fn copy_to_sbuf(&self, sbuf: &mut SBufferIteratorMut<'_, '_>) -> Result {
+        self.0.copy_to_sbuf(sbuf)
+    }
+
+    fn size(&self) -> usize {
+        self.0.size()
+    }
+}
+impl GspCommand for GetGspStaticInfo {
+    const FUNCTION: u32 = fw::NV_VGPU_MSG_FUNCTION_GET_GSP_STATIC_INFO;
 }
 
 pub(crate) fn build_wpr_meta(
