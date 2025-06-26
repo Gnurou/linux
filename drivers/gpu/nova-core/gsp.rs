@@ -8,6 +8,8 @@ use kernel::prelude::*;
 use kernel::ptr::Alignment;
 use kernel::transmute::{AsBytes, FromBytes};
 
+use crate::fb::FbLayout;
+use crate::firmware::Firmware;
 use crate::nvfw::r570_144 as fw;
 
 pub(crate) const GSP_PAGE_SHIFT: usize = 12;
@@ -21,12 +23,76 @@ unsafe impl AsBytes for fw::LibosMemoryRegionInitArgument {}
 // are valid.
 unsafe impl FromBytes for fw::LibosMemoryRegionInitArgument {}
 
+// SAFETY: Padding is explicit and will not contain uninitialized data.
+unsafe impl AsBytes for fw::GspFwWprMeta {}
+
+// SAFETY: This struct only contains integer types for which all bit patterns
+// are valid.
+unsafe impl FromBytes for fw::GspFwWprMeta {}
+
 #[allow(unused)]
 pub(crate) struct GspMemObjects {
     libos: CoherentAllocation<fw::LibosMemoryRegionInitArgument>,
     pub loginit: CoherentAllocation<u8>,
     pub logintr: CoherentAllocation<u8>,
     pub logrm: CoherentAllocation<u8>,
+    pub wpr_meta: CoherentAllocation<fw::GspFwWprMeta>,
+}
+
+pub(crate) fn build_wpr_meta(
+    dev: &device::Device<device::Bound>,
+    fw: &Firmware,
+    fb_layout: &FbLayout,
+) -> Result<CoherentAllocation<fw::GspFwWprMeta>> {
+    let wpr_meta =
+        CoherentAllocation::<fw::GspFwWprMeta>::alloc_coherent(dev, 1, GFP_KERNEL | __GFP_ZERO)?;
+    dma_write!(
+        wpr_meta[0] = fw::GspFwWprMeta {
+            magic: fw::GSP_FW_WPR_META_MAGIC as u64,
+            revision: u64::from(fw::GSP_FW_WPR_META_REVISION),
+            sysmemAddrOfRadix3Elf: fw.gsp.lvl0_dma_handle(),
+            sizeOfRadix3Elf: fw.gsp.size as u64,
+            sysmemAddrOfBootloader: fw.bootloader.ucode.dma_handle(),
+            sizeOfBootloader: fw.bootloader.ucode.size() as u64,
+            bootloaderCodeOffset: u64::from(fw.bootloader.code_offset),
+            bootloaderDataOffset: u64::from(fw.bootloader.data_offset),
+            bootloaderManifestOffset: u64::from(fw.bootloader.manifest_offset),
+            __bindgen_anon_1: fw::GspFwWprMeta__bindgen_ty_1 {
+                __bindgen_anon_1: fw::GspFwWprMeta__bindgen_ty_1__bindgen_ty_1 {
+                    sysmemAddrOfSignature: fw.gsp_sigs.dma_handle(),
+                    sizeOfSignature: fw.gsp_sigs.size() as u64,
+                }
+            },
+            gspFwRsvdStart: fb_layout.heap.start,
+            nonWprHeapOffset: fb_layout.heap.start,
+            nonWprHeapSize: fb_layout.heap.end - fb_layout.heap.start,
+            gspFwWprStart: fb_layout.wpr2.start,
+            gspFwHeapOffset: fb_layout.wpr2_heap.start,
+            gspFwHeapSize: fb_layout.wpr2_heap.end - fb_layout.wpr2_heap.start,
+            gspFwOffset: fb_layout.elf.start,
+            bootBinOffset: fb_layout.boot.start,
+            frtsOffset: fb_layout.frts.start,
+            frtsSize: fb_layout.frts.end - fb_layout.frts.start,
+            gspFwWprEnd: fb_layout.vga_workspace.start & !(0x20000 - 1),
+            gspFwHeapVfPartitionCount: fb_layout.vf_partition_count,
+            fbSize: fb_layout.fb.end - fb_layout.fb.start,
+            vgaWorkspaceOffset: fb_layout.vga_workspace.start,
+            vgaWorkspaceSize: fb_layout.vga_workspace.end - fb_layout.vga_workspace.start,
+            bootCount: 0,
+            __bindgen_anon_2: fw::GspFwWprMeta__bindgen_ty_2 {
+                __bindgen_anon_1: fw::GspFwWprMeta__bindgen_ty_2__bindgen_ty_1 {
+                    partitionRpcAddr: 0,
+                    partitionRpcRequestOffset: 0,
+                    partitionRpcReplyOffset: 0,
+                    ..Default::default()
+                },
+            },
+            verified: 0,
+            ..Default::default()
+        }
+    )?;
+
+    Ok(wpr_meta)
 }
 
 /// Generates the `ID8` identifier required for some GSP objects.
@@ -88,7 +154,11 @@ fn create_coherent_dma_object<A: AsBytes + FromBytes>(
 }
 
 impl GspMemObjects {
-    pub(crate) fn new(pdev: &pci::Device<device::Bound>) -> Result<Self> {
+    pub(crate) fn new(
+        pdev: &pci::Device<device::Bound>,
+        fw: &Firmware,
+        fb_layout: &FbLayout,
+    ) -> Result<Self> {
         let dev = pdev.as_ref();
         let mut libos = CoherentAllocation::<fw::LibosMemoryRegionInitArgument>::alloc_coherent(
             dev,
@@ -102,11 +172,14 @@ impl GspMemObjects {
         let mut logrm = create_coherent_dma_object::<u8>(dev, "LOGRM", 0x10000, &mut libos, 2)?;
         create_pte_array(&mut logrm);
 
+        let wpr_meta = build_wpr_meta(dev, fw, fb_layout)?;
+
         Ok(GspMemObjects {
             libos,
             loginit,
             logintr,
             logrm,
+            wpr_meta,
         })
     }
 

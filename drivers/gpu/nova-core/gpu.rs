@@ -14,6 +14,7 @@ use crate::gsp::GspMemObjects;
 use crate::regs;
 use crate::util;
 use crate::vbios::Vbios;
+
 use core::fmt;
 
 macro_rules! define_chipset {
@@ -311,8 +312,9 @@ impl Gpu {
 
         Self::run_fwsec_frts(pdev.as_ref(), &gsp_falcon, bar, &bios, &fb_layout)?;
 
-        let libos = gsp::GspMemObjects::new(pdev)?;
+        let libos = gsp::GspMemObjects::new(pdev, &fw, &fb_layout)?;
         let _libos_handle = libos.libos_dma_handle();
+        let _wpr_handle = libos.wpr_meta.dma_handle();
 
         Ok(pin_init!(Self {
             spec,
