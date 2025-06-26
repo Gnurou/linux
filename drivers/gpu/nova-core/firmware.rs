@@ -115,11 +115,11 @@ mod elf {
 }
 
 /// Structure encapsulating the firmware blobs required for the GPU to operate.
-#[expect(dead_code)]
 pub(crate) struct Firmware {
     /// Runs on the sec2 falcon engine to load and start the GSP bootloader.
-    booter_loader: BooterFirmware,
+    pub booter_loader: BooterFirmware,
     /// Runs on the sec2 falcon engine to stop and unload a running GSP firmware.
+    #[expect(unused)]
     booter_unloader: BooterFirmware,
     /// GSP bootloader, verifies the GSP firmware before loading and running it.
     pub gsp_bootloader: RiscvFirmware,

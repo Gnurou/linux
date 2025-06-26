@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 
-use kernel::{device, devres::Devres, error::code::*, pci, prelude::*, sync::Arc};
+use kernel::{device, devres::Devres, error::code::*, pci, prelude::*, sync::Arc, time::Delta};
 
 use crate::driver::Bar0;
 use crate::falcon::{gsp::Gsp, sec2::Sec2, Falcon};
@@ -314,8 +314,58 @@ impl Gpu {
         Self::run_fwsec_frts(pdev.as_ref(), &gsp_falcon, bar, &bios, &fb_layout)?;
 
         let libos = gsp::GspMemObjects::new(pdev, bar, &fw, &fb_layout)?;
-        let _libos_handle = libos.libos_dma_handle();
-        let _wpr_handle = libos.wpr_meta.dma_handle();
+        let libos_handle = libos.libos_dma_handle();
+        let wpr_handle = libos.wpr_meta.dma_handle();
+
+        gsp_falcon.reset(bar)?;
+        let (mbox0, mbox1) = gsp_falcon.boot(
+            bar,
+            Some(libos_handle as u32),
+            Some((libos_handle >> 32) as u32),
+        )?;
+        dev_dbg!(
+            pdev.as_ref(),
+            "GSP MBOX0: {:#x}, MBOX1: {:#x}\n",
+            mbox0,
+            mbox1
+        );
+
+        dev_dbg!(
+            pdev.as_ref(),
+            "Using SEC2 to load and run the booter_load firmware...\n"
+        );
+
+        sec2_falcon.reset(&bar)?;
+        sec2_falcon.dma_load(&bar, &fw.booter_loader)?;
+        let (mbox0, mbox1) = sec2_falcon.boot(
+            &bar,
+            Some(wpr_handle as u32),
+            Some((wpr_handle >> 32) as u32),
+        )?;
+        dev_dbg!(
+            pdev.as_ref(),
+            "SEC2 MBOX0: {:#x}, MBOX1{:#x}\n",
+            mbox0,
+            mbox1
+        );
+
+        // Match what Nouveau does here:
+        gsp_falcon.write_os_version(&bar, fw.bootloader.app_version)?;
+
+        // Poll for RISC-V to become active before running sequencer
+        util::wait_on(Delta::from_secs(5), || {
+            if gsp_falcon.is_riscv_active(&bar).unwrap_or(false) {
+                Some(())
+            } else {
+                None
+            }
+        })?;
+
+        dev_dbg!(
+            pdev.as_ref(),
+            "RISC-V active? {}\n",
+            gsp_falcon.is_riscv_active(&bar)?,
+        );
 
         Ok(pin_init!(Self {
             spec,
