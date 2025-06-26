@@ -15,7 +15,7 @@ use crate::firmware::{
     FIRMWARE_VERSION,
 };
 use crate::gpu::Chipset;
-use crate::gsp::{sequencer::GspSequencer, GspFwWprMeta};
+use crate::gsp::{commands::gsp_init_done, sequencer::GspSequencer, GspFwWprMeta};
 use crate::regs;
 use crate::util;
 use crate::vbios::Vbios;
@@ -105,7 +105,7 @@ impl super::Gsp {
     ///
     /// Upon return, the GSP is up and running, and its runtime object given as return value.
     pub(crate) fn boot(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         pdev: &pci::Device<device::Bound>,
         bar: &Bar0,
         chipset: Chipset,
@@ -180,7 +180,7 @@ impl super::Gsp {
 
         // Create and run the GSP sequencer
         GspSequencer::run(
-            self.cmdq(),
+            self.as_mut().cmdq(),
             &gsp_fw,
             libos_handle,
             gsp_falcon,
@@ -189,6 +189,8 @@ impl super::Gsp {
             bar,
             Delta::from_secs(10),
         )?;
+
+        gsp_init_done(self.cmdq(), Delta::from_secs(10))?;
 
         Ok(())
     }
