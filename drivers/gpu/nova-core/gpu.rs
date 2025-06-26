@@ -9,6 +9,8 @@ use crate::fb::SysmemFlush;
 use crate::firmware::fwsec::{FwsecCommand, FwsecFirmware};
 use crate::firmware::{Firmware, FIRMWARE_VERSION};
 use crate::gfw;
+use crate::gsp;
+use crate::gsp::GspMemObjects;
 use crate::regs;
 use crate::util;
 use crate::vbios::Vbios;
@@ -308,6 +310,9 @@ impl Gpu {
         let bios = Vbios::new(pdev, bar)?;
 
         Self::run_fwsec_frts(pdev.as_ref(), &gsp_falcon, bar, &bios, &fb_layout)?;
+
+        let libos = gsp::GspMemObjects::new(pdev)?;
+        let _libos_handle = libos.libos_dma_handle();
 
         Ok(pin_init!(Self {
             spec,
