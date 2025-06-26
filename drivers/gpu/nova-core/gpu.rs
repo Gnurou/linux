@@ -175,6 +175,7 @@ pub(crate) struct Gpu {
     /// System memory page required for flushing all pending GPU-side memory writes done through
     /// PCIE into system memory, via sysmembar (A GPU-initiated HW memory-barrier operation).
     sysmem_flush: SysmemFlush,
+    libos: GspMemObjects,
 }
 
 #[pinned_drop]
@@ -321,6 +322,7 @@ impl Gpu {
             bar: devres_bar,
             fw,
             sysmem_flush,
+            libos,
         }))
     }
 }
