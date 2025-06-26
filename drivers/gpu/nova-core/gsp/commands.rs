@@ -4,15 +4,17 @@ use kernel::build_assert;
 use kernel::device;
 use kernel::pci;
 use kernel::prelude::*;
+use kernel::time::Delta;
 use kernel::transmute::{AsBytes, FromBytes};
 
 use super::fw::{
-    GspSystemInfo, NV_VGPU_MSG_FUNCTION_GSP_SET_SYSTEM_INFO, NV_VGPU_MSG_FUNCTION_SET_REGISTRY,
-    PACKED_REGISTRY_ENTRY, PACKED_REGISTRY_TABLE, REGISTRY_TABLE_ENTRY_TYPE_DWORD,
+    GspSystemInfo, NV_VGPU_MSG_EVENT_GSP_INIT_DONE, NV_VGPU_MSG_FUNCTION_GSP_SET_SYSTEM_INFO,
+    NV_VGPU_MSG_FUNCTION_SET_REGISTRY, PACKED_REGISTRY_ENTRY, PACKED_REGISTRY_TABLE,
+    REGISTRY_TABLE_ENTRY_TYPE_DWORD,
 };
 use crate::driver::Bar0;
 use crate::gsp::cmdq::GspCmdq;
-use crate::gsp::cmdq::GspCommandToGsp;
+use crate::gsp::cmdq::{GspCommandToGsp, GspMessageFromGsp};
 use crate::gsp::GSP_PAGE_SIZE;
 use crate::sbuffer::SBuffer;
 
@@ -23,6 +25,23 @@ unsafe impl AsBytes for GspSystemInfo {}
 // SAFETY: These structs don't meet the no-padding requirements of FromBytes but
 //         that is not a problem because they are not used outside the kernel.
 unsafe impl FromBytes for GspSystemInfo {}
+
+struct GspInitDone {}
+unsafe impl AsBytes for GspInitDone {}
+unsafe impl FromBytes for GspInitDone {}
+impl GspMessageFromGsp for GspInitDone {
+    const FUNCTION: u32 = NV_VGPU_MSG_EVENT_GSP_INIT_DONE;
+}
+
+pub(crate) fn gsp_init_done(cmdq: &mut GspCmdq, timeout: Delta) -> Result {
+    loop {
+        match cmdq.receive_msg_from_gsp::<GspInitDone, ()>(timeout, |_, _| Ok(())) {
+            Ok(_) => break Ok(()),
+            Err(ERANGE) => continue,
+            Err(e) => break Err(e),
+        }
+    }
+}
 
 const GSP_REGISTRY_NUM_ENTRIES: usize = 2;
 struct RegistryEntry {
