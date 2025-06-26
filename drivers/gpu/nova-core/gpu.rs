@@ -11,6 +11,7 @@ use crate::firmware::{Firmware, FIRMWARE_VERSION};
 use crate::gfw;
 use crate::gsp;
 use crate::gsp::GspMemObjects;
+use crate::gsp::commands::gsp_init_done;
 use crate::regs;
 use crate::util;
 use crate::vbios::Vbios;
@@ -362,6 +363,8 @@ impl Gpu {
             &bar,
             Delta::from_secs(10),
         )?;
+
+        gsp_init_done(&mut libos.cmdq, Delta::from_secs(10))?;
 
         Ok(pin_init!(Self {
             spec,
