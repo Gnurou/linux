@@ -10,9 +10,26 @@ use super::fw::commands::*;
 use super::fw::MsgFunction;
 use crate::driver::Bar0;
 use crate::gsp::cmdq::Cmdq;
-use crate::gsp::cmdq::{CommandToGsp, CommandToGspBase, CommandToGspWithPayload};
+use crate::gsp::cmdq::{CommandToGsp, CommandToGspBase, CommandToGspWithPayload, MessageFromGsp};
 use crate::gsp::GSP_PAGE_SIZE;
 use crate::sbuffer::SBufferIter;
+
+struct GspInitDone {}
+unsafe impl AsBytes for GspInitDone {}
+unsafe impl FromBytes for GspInitDone {}
+impl GspMessageFromGsp for GspInitDone {
+    const FUNCTION: u32 = NV_VGPU_MSG_EVENT_GSP_INIT_DONE;
+}
+
+pub(crate) fn gsp_init_done(cmdq: &mut GspCmdq, timeout: Delta) -> Result {
+    loop {
+        match cmdq.receive_msg_from_gsp::<GspInitDone, ()>(timeout, |_, _| Ok(())) {
+            Ok(_) => break Ok(()),
+            Err(ERANGE) => continue,
+            Err(e) => break Err(e),
+        }
+    }
+}
 
 // For now we hard-code the registry entries. Future work will allow others to
 // be added as module parameters.

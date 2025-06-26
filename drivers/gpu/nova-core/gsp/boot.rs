@@ -18,7 +18,7 @@ use crate::firmware::{
     FIRMWARE_VERSION,
 };
 use crate::gpu::Chipset;
-use crate::gsp::commands::{build_registry, set_system_info};
+use crate::gsp::commands::{build_registry, gsp_init_done, set_system_info};
 use crate::gsp::{sequencer::GspSequencer, GspFwWprMeta};
 use crate::regs;
 use crate::vbios::Vbios;
@@ -215,6 +215,8 @@ impl super::Gsp {
             bar,
             Delta::from_secs(10),
         )?;
+
+        gsp_init_done(&mut self.cmdq, Delta::from_secs(10))?;
 
         Ok(())
     }
