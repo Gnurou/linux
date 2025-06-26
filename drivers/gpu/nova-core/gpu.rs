@@ -431,6 +431,8 @@ impl Gpu {
             }
         }
 
+        libos.cmdq.gsp_init_done(Delta::from_secs(10))?;
+
         Ok(pin_init!(Self {
             spec,
             bar: devres_bar,
