@@ -389,7 +389,11 @@ impl<E: FalconEngine + 'static> Falcon<E> {
 
     /// Wait for memory scrubbing to complete.
     fn reset_wait_mem_scrubbing(&self, bar: &Bar0) -> Result {
-        // TIMEOUT: memory scrubbing should complete in less than 20ms.
+        // Clear MAILBOX0 before waiting for memory scrubbing
+        regs::NV_PFALCON_FALCON_MAILBOX0::default()
+            .set_value(0)
+            .write(bar, &E::ID);
+
         util::wait_on(Delta::from_millis(20), || {
             if regs::NV_PFALCON_FALCON_HWCFG2::read(bar, &E::ID).mem_scrubbing_done() {
                 Some(())
