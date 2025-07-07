@@ -90,6 +90,9 @@ pub(crate) trait GspCommand: GspCommandElement {
 
 pub(crate) struct GspStaticConfigInfo {
     pub gpu_name: [u8; 40],
+    pub h_internal_client: u32,
+    pub h_internal_device: u32,
+    pub h_internal_subdevice: u32,
 }
 
 impl GspMessageElement for GspStaticConfigInfo {
@@ -123,7 +126,12 @@ impl GspMessageElement for GspStaticConfigInfo {
         gpu_name[..copy_len].copy_from_slice(&bytes[..copy_len]);
         gpu_name[copy_len] = b'\0';
 
-        Ok(GspStaticConfigInfo { gpu_name })
+        Ok(GspStaticConfigInfo {
+            gpu_name,
+            h_internal_client: static_info.hInternalClient,
+            h_internal_device: static_info.hInternalDevice,
+            h_internal_subdevice: static_info.hInternalSubdevice,
+        })
     }
 }
 
