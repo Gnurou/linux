@@ -198,6 +198,7 @@ pub(crate) struct Gpu {
     sysmem_flush: SysmemFlush,
     wpr_meta: CoherentAllocation<fw::GspFwWprMeta>,
     libos: GspMemObjects,
+    gsp_info: gsp::GspStaticConfigInfo,
 }
 
 #[pinned_drop]
@@ -448,12 +449,20 @@ impl Gpu {
         }
 
         libos.cmdq.gsp_init_done(Delta::from_secs(10))?;
-        libos.cmdq.get_gsp_info(bar)?;
-        let info = libos.cmdq.get_gsp_info(bar)?;
+
+        let gsp_info = libos.cmdq.get_gsp_info(bar)?;
+
         dev_info!(
             pdev.as_ref(),
             "GPU name: {}\n",
-            util::str_from_null_terminated(&info.gpu_name)
+            util::str_from_null_terminated(&gsp_info.gpu_name)
+        );
+        dev_dbg!(
+            pdev.as_ref(),
+            "GSP Handles: Client={:#x}, Device={:#x}, Subdevice={:#x}\n",
+            gsp_info.h_internal_client,
+            gsp_info.h_internal_device,
+            gsp_info.h_internal_subdevice
         );
 
         Ok(pin_init!(Self {
@@ -463,6 +472,7 @@ impl Gpu {
             sysmem_flush,
             wpr_meta,
             libos,
+            gsp_info,
         }))
     }
 }
