@@ -9,11 +9,12 @@ use crate::fb::FbLayout;
 use crate::fb::SysmemFlush;
 use crate::firmware::fwsec::{FwsecCommand, FwsecFirmware};
 use crate::firmware::{Firmware, FIRMWARE_VERSION};
-use crate::gfw;
 use crate::gsp;
 use crate::regs;
 use crate::util;
+use crate::util::AnnotateError;
 use crate::vbios::Vbios;
+use crate::{gfw, nova_err};
 use core::fmt;
 
 macro_rules! define_chipset {
@@ -298,12 +299,15 @@ impl Gpu {
 
         let sec2_falcon = Falcon::<Sec2>::new(pdev.as_ref(), spec.chipset, bar, true)?;
 
-        let fw = Firmware::new(
-            pdev.as_ref(),
-            &sec2_falcon,
-            bar,
-            spec.chipset,
-            FIRMWARE_VERSION,
+        let fw = nova_err!(
+            Firmware::new(
+                pdev.as_ref(),
+                &sec2_falcon,
+                bar,
+                spec.chipset,
+                FIRMWARE_VERSION,
+            ),
+            "hurr durr I'm a fail"
         )?;
 
         let fb_layout = FbLayout::new(spec.chipset, bar, &fw)?;

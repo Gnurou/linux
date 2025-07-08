@@ -45,3 +45,78 @@ pub(crate) fn wait_on<R, F: Fn() -> Option<R>>(timeout: Delta, cond: F) -> Resul
         }
     }
 }
+
+/// An error with a message attached to it.
+///
+/// This type can be converted into a [`kernel::error::Error`]. When this happens, the message is
+/// printed. This lets us annotate all error sites with a unique string (e.g. their location in the
+/// source code) and have it printed when the function returns and converts the error.
+pub(crate) struct NovaError {
+    msg: &'static str,
+    error: kernel::error::Error,
+}
+
+impl NovaError {
+    pub(crate) fn new(msg: &'static str, error: kernel::error::Error) -> Self {
+        Self { msg, error }
+    }
+}
+
+impl From<NovaError> for kernel::error::Error {
+    fn from(error: NovaError) -> Self {
+        // Display the error.
+        pr_err!("{} ({:?})\n", error.msg, error.error);
+
+        error.error
+    }
+}
+
+/// Extension trait to provide an `annotate` method to the [`kernel::error::Error`] and
+/// [`kernel::error::Result`] types and convert them into [`NovaError`] or [`NovaResult`],
+/// respectively.
+pub(crate) trait AnnotateError {
+    type Target;
+
+    fn annotate(self, msg: &'static str) -> Self::Target;
+}
+
+impl AnnotateError for kernel::error::Error {
+    type Target = NovaError;
+
+    fn annotate(self, msg: &'static str) -> Self::Target {
+        NovaError { msg, error: self }
+    }
+}
+
+/// When a [`NovaError`] is annotated, its error message is dumped and a new one is created. This
+/// allows to trace the complete path to a failure.
+impl AnnotateError for NovaError {
+    type Target = NovaError;
+
+    fn annotate(self, msg: &'static str) -> Self::Target {
+        // Convert into a kernel error to display the message.
+        let error = self.into();
+
+        NovaError { msg, error }
+    }
+}
+
+pub(crate) type NovaResult<T = ()> = core::result::Result<T, NovaError>;
+
+impl<T, E: AnnotateError> AnnotateError for core::result::Result<T, E> {
+    type Target = core::result::Result<T, E::Target>;
+
+    fn annotate(self, msg: &'static str) -> Self::Target {
+        self.map_err(|e| e.annotate(msg))
+    }
+}
+
+#[macro_export]
+macro_rules! nova_err {
+    ($e: expr) => {
+        $e.annotate(core::concat!(core::file!(), ":", core::line!()))
+    };
+    ($e: expr, $msg: literal) => {
+        $e.annotate(core::concat!(core::file!(), ":", core::line!(), ": ", $msg))
+    };
+}

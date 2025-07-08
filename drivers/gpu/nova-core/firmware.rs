@@ -20,6 +20,8 @@ use crate::falcon::FalconFirmware;
 use crate::falcon::{sec2::Sec2, Falcon};
 use crate::gpu;
 use crate::gpu::Chipset;
+use crate::nova_err;
+use crate::util::{AnnotateError, NovaResult};
 
 pub(crate) mod fwsec;
 pub(crate) mod radix3;
@@ -98,8 +100,8 @@ impl Firmware {
         bar: &Bar0,
         chipset: Chipset,
         ver: &str,
-    ) -> Result<Firmware> {
-        let mut chip_name = CString::try_from_fmt(fmt!("{}", chipset))?;
+    ) -> NovaResult<Firmware> {
+        let mut chip_name = nova_err!(CString::try_from_fmt(fmt!("{}", chipset)))?;
         chip_name.make_ascii_lowercase();
 
         let request = |name_| {
@@ -107,23 +109,30 @@ impl Firmware {
                 .and_then(|path| firmware::Firmware::request(&path, dev))
         };
 
-        let gsp_fw = request("gsp")?;
-        let gsp = elf_section(gsp_fw.data(), ".fwimage")
+        let gsp_fw = nova_err!(request("gsp"))?;
+        let gsp = nova_err!(elf_section(gsp_fw.data(), ".fwimage")
             .ok_or(EINVAL)
-            .and_then(|data| RadixFirmware::new(dev, ".fwimage", data))?;
+            .and_then(|data| RadixFirmware::new(dev, ".fwimage", data)))?;
 
         // TODO: make this a GPU-specific const.
         let gsp_sigs_section = ".fwsignature_ga10x";
-        let gsp_sigs = elf_section(gsp_fw.data(), gsp_sigs_section)
+        let gsp_sigs = nova_err!(elf_section(gsp_fw.data(), gsp_sigs_section)
             .ok_or(EINVAL)
-            .and_then(|data| DmaObject::from_data(dev, data))?;
+            .and_then(|data| DmaObject::from_data(dev, data)))?;
+
+        // Let's fail here for the lulz.
+        return Err(nova_err!(EINVAL));
 
         Ok(Firmware {
-            booter_load: request("booter_load")
-                .and_then(|fw| Sec2Firmware::new(sec2, dev, bar, &fw))?,
-            booter_unload: request("booter_unload")
-                .and_then(|fw| Sec2Firmware::new(sec2, dev, bar, &fw))?,
-            bootloader: request("bootloader").and_then(|fw| RiscvFirmware::new(dev, &fw))?,
+            booter_load: nova_err!(
+                request("booter_load").and_then(|fw| Sec2Firmware::new(sec2, dev, bar, &fw))
+            )?,
+            booter_unload: nova_err!(
+                request("booter_unload").and_then(|fw| Sec2Firmware::new(sec2, dev, bar, &fw))
+            )?,
+            bootloader: nova_err!(
+                request("bootloader").and_then(|fw| RiscvFirmware::new(dev, &fw))
+            )?,
             gsp,
             gsp_sigs,
         })
