@@ -7,6 +7,7 @@ use core::marker::PhantomData;
 use core::mem::size_of;
 
 use booter::BooterFirmware;
+use gsp::GspFirmware;
 use kernel::device;
 use kernel::firmware;
 use kernel::prelude::*;
@@ -19,13 +20,99 @@ use crate::driver::Bar0;
 use crate::falcon::FalconFirmware;
 use crate::falcon::{sec2::Sec2, Falcon};
 use crate::gpu;
-use crate::gpu::Chipset;
+use crate::gpu::{Architecture, Chipset};
 
 pub(crate) mod booter;
 pub(crate) mod fwsec;
+pub(crate) mod gsp;
 pub(crate) mod riscv;
 
 pub(crate) const FIRMWARE_VERSION: &str = "535.113.01";
+
+/// Ad-hoc and temporary module to extract sections from ELF images.
+///
+/// Some firmware images are currently packaged as ELF files, where sections names are used as keys
+/// to specific and related bits of data. Future firmware versions are scheduled to move away from
+/// that scheme before nova-core becomes stable, which means this module will eventually be
+/// removed.
+mod elf {
+    use kernel::bindings;
+    use kernel::str::CStr;
+    use kernel::transmute::FromBytes;
+
+    /// Newtype to provide a [`FromBytes`] implementation.
+    #[repr(transparent)]
+    struct Elf64Hdr(bindings::elf64_hdr);
+
+    // SAFETY: all bit patterns are valid for this type, and it doesn't use interior mutability.
+    unsafe impl FromBytes for Elf64Hdr {}
+
+    /// Tries to extract section with name `name` from the ELF64 image `elf`, and returns it.
+    pub(super) fn elf64_section<'a, 'b>(elf: &'a [u8], name: &'b str) -> Option<&'a [u8]> {
+        let hdr = &elf
+            .get(0..size_of::<bindings::elf64_hdr>())
+            .and_then(Elf64Hdr::from_bytes)?
+            .0;
+
+        // Get all the section headers.
+        let shdr = {
+            let shdr_num = usize::from(hdr.e_shnum);
+            let shdr_start = usize::try_from(hdr.e_shoff).ok()?;
+            let shdr_end = shdr_num
+                .checked_mul(size_of::<bindings::elf64_shdr>())
+                .and_then(|v| v.checked_add(shdr_start))?;
+
+            elf.get(shdr_start..shdr_end)
+                .map(|slice| slice.as_ptr())
+                .filter(|ptr| ptr.align_offset(align_of::<bindings::elf64_shdr>()) == 0)
+                // `FromBytes::from_bytes` does not support slices yet, so build it manually.
+                //
+                // SAFETY:
+                // * `get` guarantees that the slice is within the bounds of `elf` and of size
+                //   `elf64_shdr * shdr_num`.
+                // * We checked that `ptr` had the correct alignment for `elf64_shdr`.
+                .map(|ptr| unsafe {
+                    core::slice::from_raw_parts(ptr.cast::<bindings::elf64_shdr>(), shdr_num)
+                })?
+        };
+
+        // Get the strings table.
+        let strhdr = shdr.get(usize::from(hdr.e_shstrndx))?;
+
+        // Find the section which name matches `name` and return it.
+        shdr.iter()
+            .find(|sh| {
+                let Some(name_idx) = strhdr
+                    .sh_offset
+                    .checked_add(u64::from(sh.sh_name))
+                    .and_then(|idx| usize::try_from(idx).ok())
+                else {
+                    return false;
+                };
+
+                // Get the start of the name.
+                elf.get(name_idx..)
+                    // Stop at the first `0`.
+                    .and_then(|nstr| nstr.get(0..=nstr.iter().position(|b| *b == 0)?))
+                    // Convert into CStr. This should never fail because of the line above.
+                    .and_then(|nstr| CStr::from_bytes_with_nul(nstr).ok())
+                    // Convert into str.
+                    .and_then(|c_str| c_str.to_str().ok())
+                    // Check that the name matches.
+                    .map(|str| str == name)
+                    .unwrap_or(false)
+            })
+            // Return the slice containing the section.
+            .and_then(|sh| {
+                let start = usize::try_from(sh.sh_offset).ok()?;
+                let end = usize::try_from(sh.sh_size)
+                    .ok()
+                    .and_then(|sh_size| start.checked_add(sh_size))?;
+
+                elf.get(start..end)
+            })
+    }
+}
 
 /// Structure encapsulating the firmware blobs required for the GPU to operate.
 #[expect(dead_code)]
@@ -36,7 +123,10 @@ pub(crate) struct Firmware {
     booter_unloader: BooterFirmware,
     /// GSP bootloader, verifies the GSP firmware before loading and running it.
     gsp_bootloader: RiscvFirmware,
-    gsp: firmware::Firmware,
+    /// GSP firmware.
+    gsp: Pin<KBox<GspFirmware>>,
+    /// GSP signatures, to be passed as parameter to the bootloader for validation.
+    gsp_sigs: DmaObject,
 }
 
 impl Firmware {
@@ -56,13 +146,27 @@ impl Firmware {
                 .and_then(|path| firmware::Firmware::request(&path, dev))
         };
 
+        let gsp_fw = request("gsp")?;
+        let gsp = elf::elf64_section(gsp_fw.data(), ".fwimage")
+            .ok_or(EINVAL)
+            .map(|data| GspFirmware::new(dev, data))?;
+
+        let gsp_sigs_section = match chipset.arch() {
+            Architecture::Ampere => ".fwsignature_ga10x",
+            _ => return Err(ENOTSUPP),
+        };
+        let gsp_sigs = elf::elf64_section(gsp_fw.data(), gsp_sigs_section)
+            .ok_or(EINVAL)
+            .and_then(|data| DmaObject::from_data(dev, data))?;
+
         Ok(Firmware {
             booter_loader: request("booter_load")
                 .and_then(|fw| BooterFirmware::new(dev, &fw, sec2, bar))?,
             booter_unloader: request("booter_unload")
                 .and_then(|fw| BooterFirmware::new(dev, &fw, sec2, bar))?,
             gsp_bootloader: request("bootloader").and_then(|fw| RiscvFirmware::new(dev, &fw))?,
-            gsp: request("gsp")?,
+            gsp: KBox::pin_init(gsp, GFP_KERNEL)?,
+            gsp_sigs,
         })
     }
 }
