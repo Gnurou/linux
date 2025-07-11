@@ -27,7 +27,6 @@ impl Falcon<Gsp> {
     }
 
     /// Function to check if GSP reload/resume has completed during the boot process.
-    #[expect(dead_code)]
     pub(crate) fn check_reload_completed(
         &self,
         bar: &Bar0,
