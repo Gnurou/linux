@@ -13,6 +13,7 @@ use crate::falcon::{gsp::Gsp, sec2::Sec2, Falcon};
 use crate::firmware::gsp::GspFirmware;
 use crate::gsp::cmdq::{GspCmdq, GspMessageFromGsp};
 use crate::gsp::fw;
+use crate::util::wait_on;
 
 use kernel::transmute::FromBytes;
 use kernel::{dev_dbg, dev_err};
@@ -32,7 +33,6 @@ struct GspSequencerInfo<'a> {
 
 /// GSP Sequencer Command types with payload data
 /// Commands have an opcode and a opcode-dependent struct.
-#[expect(dead_code)]
 pub(crate) enum GspSeqCmd {
     RegWrite(fw::GSP_SEQ_BUF_PAYLOAD_REG_WRITE),
     RegModify(fw::GSP_SEQ_BUF_PAYLOAD_REG_MODIFY),
@@ -44,6 +44,20 @@ impl GspSeqCmd {
     /// Creates a new GspSeqCmd from a firmware GSP_SEQUENCER_BUFFER_CMD
     pub(crate) fn from_fw_cmd(cmd: &fw::GSP_SEQUENCER_BUFFER_CMD) -> Result<Self> {
         match cmd.opCode {
+            // SAFETY: In the below unsafe accesses, we're using the union field
+            //         that corresponds to the opCode
+            fw::GSP_SEQ_BUF_OPCODE_GSP_SEQ_BUF_OPCODE_REG_WRITE => {
+                Ok(GspSeqCmd::RegWrite(unsafe { cmd.payload.regWrite }))
+            }
+            fw::GSP_SEQ_BUF_OPCODE_GSP_SEQ_BUF_OPCODE_REG_MODIFY => {
+                Ok(GspSeqCmd::RegModify(unsafe { cmd.payload.regModify }))
+            }
+            fw::GSP_SEQ_BUF_OPCODE_GSP_SEQ_BUF_OPCODE_REG_POLL => {
+                Ok(GspSeqCmd::RegPoll(unsafe { cmd.payload.regPoll }))
+            }
+            fw::GSP_SEQ_BUF_OPCODE_GSP_SEQ_BUF_OPCODE_REG_STORE => {
+                Ok(GspSeqCmd::RegStore(unsafe { cmd.payload.regStore }))
+            }
             _ => Err(EINVAL),
         }
     }
@@ -63,7 +77,16 @@ impl GspSeqCmd {
     /// Get the size of this command in bytes, the command consists of
     /// a 4-byte opcode, and a variable-sized payload.
     pub(crate) fn size_bytes(&self) -> usize {
-        0
+        let opcode_size = size_of::<fw::GSP_SEQ_BUF_OPCODE>();
+        match self {
+            // For commands with payloads, add the payload size in bytes
+            GspSeqCmd::RegWrite(_) => opcode_size + size_of::<fw::GSP_SEQ_BUF_PAYLOAD_REG_WRITE>(),
+            GspSeqCmd::RegModify(_) => {
+                opcode_size + size_of::<fw::GSP_SEQ_BUF_PAYLOAD_REG_MODIFY>()
+            }
+            GspSeqCmd::RegPoll(_) => opcode_size + size_of::<fw::GSP_SEQ_BUF_PAYLOAD_REG_POLL>(),
+            GspSeqCmd::RegStore(_) => opcode_size + size_of::<fw::GSP_SEQ_BUF_PAYLOAD_REG_STORE>(),
+        }
     }
 }
 
@@ -82,9 +105,105 @@ pub(crate) trait GspSeqCmdRunner {
     fn run(&self, sequencer: &GspSequencer<'_>) -> Result;
 }
 
-impl GspSeqCmdRunner for GspSeqCmd {
-    fn run(&self, _seq: &GspSequencer<'_>) -> Result {
+impl GspSeqCmdRunner for fw::GSP_SEQ_BUF_PAYLOAD_REG_WRITE {
+    fn run(&self, sequencer: &GspSequencer<'_>) -> Result {
+        dev_dbg!(
+            sequencer.dev,
+            "RegWrite: addr=0x{:x}, val=0x{:x}\n",
+            self.addr,
+            self.val
+        );
+        let addr = self.addr as usize;
+        let val = self.val;
+        let _ = sequencer.bar.try_write32(val, addr);
         Ok(())
+    }
+}
+
+impl GspSeqCmdRunner for fw::GSP_SEQ_BUF_PAYLOAD_REG_MODIFY {
+    fn run(&self, sequencer: &GspSequencer<'_>) -> Result {
+        dev_dbg!(
+            sequencer.dev,
+            "RegModify: addr=0x{:x}, mask=0x{:x}, val=0x{:x}\n",
+            self.addr,
+            self.mask,
+            self.val
+        );
+
+        let addr = self.addr as usize;
+        if let Ok(temp) = sequencer.bar.try_read32(addr) {
+            let _ = sequencer
+                .bar
+                .try_write32((temp & !self.mask) | self.val, addr);
+        }
+        Ok(())
+    }
+}
+
+impl GspSeqCmdRunner for fw::GSP_SEQ_BUF_PAYLOAD_REG_POLL {
+    fn run(&self, sequencer: &GspSequencer<'_>) -> Result {
+        dev_dbg!(
+            sequencer.dev,
+            "RegPoll: addr=0x{:x}, mask=0x{:x}, val=0x{:x}, timeout=0x{:x}, error=0x{:x}\n",
+            self.addr,
+            self.mask,
+            self.val,
+            self.timeout,
+            self.error
+        );
+
+        let addr = self.addr as usize;
+        let mut timeout_us = self.timeout as i64;
+
+        // Default timeout to 4 seconds
+        timeout_us = if timeout_us == 0 { 4000000 } else { timeout_us };
+
+        // First read
+        sequencer.bar.try_read32(addr)?;
+
+        // Poll the requested register with requested timeout.
+        // wait_on() unwraps the closure's Option<R> return value
+        // and returns a Result<R>.
+        wait_on(Delta::from_micros(timeout_us), || {
+            sequencer.bar.try_read32(addr).ok().and_then(|current| {
+                if (current & self.mask) == self.val {
+                    Some(())
+                } else {
+                    None
+                }
+            })
+        })?;
+        Ok(())
+    }
+}
+
+impl GspSeqCmdRunner for fw::GSP_SEQ_BUF_PAYLOAD_REG_STORE {
+    fn run(&self, sequencer: &GspSequencer<'_>) -> Result {
+        let addr = self.addr as usize;
+        let _index = self.index;
+
+        let val = sequencer.bar.try_read32(addr)?;
+
+        dev_dbg!(
+            sequencer.dev,
+            "RegStore: addr=0x{:x}, index=0x{:x}, value={:?}\n",
+            self.addr,
+            self.index,
+            val
+        );
+
+        Ok(())
+    }
+}
+
+impl GspSeqCmdRunner for GspSeqCmd {
+    fn run(&self, seq: &GspSequencer<'_>) -> Result {
+        match self {
+            GspSeqCmd::RegWrite(cmd) => cmd.run(seq),
+            GspSeqCmd::RegModify(cmd) => cmd.run(seq),
+            GspSeqCmd::RegPoll(cmd) => cmd.run(seq),
+            GspSeqCmd::RegStore(cmd) => cmd.run(seq),
+        }
     }
 }
 
