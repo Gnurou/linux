@@ -150,6 +150,16 @@ pub(crate) fn elf_section<'a, 'b>(elf: &'a [u8], section_name: &'b str) -> Optio
     }
 }
 
+fn get_signature_section(chipset: Chipset) -> Result<&'static str> {
+    match chipset.arch() {
+        gpu::Architecture::Ampere => Ok(".fwsignature_ga10x"),
+        gpu::Architecture::Hopper => Ok(".fwsignature_gh10x"),
+        gpu::Architecture::Ada => Ok(".fwsignature_ad10x"),
+        gpu::Architecture::Blackwell => Ok(".fwsignature_gb10x"),
+        _ => Err(ENOTSUPP),
+    }
+}
+
 /// Structure encapsulating the firmware blobs required for the GPU to operate.
 #[expect(dead_code)]
 pub(crate) struct Firmware {
@@ -162,22 +172,21 @@ pub(crate) struct Firmware {
 }
 
 impl Firmware {
-    pub(crate) fn new(
-        dev: &device::Device<device::Bound>,
-        sec2: &Falcon<Sec2>,
-        bar: &Bar0,
-        chipset: Chipset,
-        ver: &str,
-    ) -> Result<Firmware> {
+    /// Helper function to create firmware file path
+    fn firmware_path(chipset: Chipset, ver: &str, name: &str) -> Result<CString> {
         let mut chip_name = CString::try_from_fmt(fmt!("{}", chipset))?;
         chip_name.make_ascii_lowercase();
+        CString::try_from_fmt(fmt!("nvidia/{}/gsp/{}-{}.bin", &*chip_name, name, ver))
+    }
 
-        let request = |name_| {
-            CString::try_from_fmt(fmt!("nvidia/{}/gsp/{}-{}.bin", &*chip_name, name_, ver))
-                .and_then(|path| firmware::Firmware::request(&path, dev))
-        };
-
-        let gsp_fw = request("gsp")?;
+    /// Helper function to load and process GSP firmware (common to both architectures)
+    fn load_gsp_firmware(
+        dev: &device::Device<device::Bound>,
+        chipset: Chipset,
+        ver: &str,
+    ) -> Result<(RadixFirmware, DmaObject, RmRiscvUCodeDesc)> {
+        let gsp_fw = Self::firmware_path(chipset, ver, "gsp")
+            .and_then(|path| firmware::Firmware::request(&path, dev))?;
 
         let (gsp, gsp_desc) = {
             // Extract the .fwimage section for the GSP firmware
@@ -201,16 +210,27 @@ impl Firmware {
         };
 
         // Architecture-specific firmware signature section
-        let gsp_sigs_section = match chipset.arch() {
-            gpu::Architecture::Ampere => ".fwsignature_ga10x",
-            gpu::Architecture::Hopper => ".fwsignature_gh10x",
-            gpu::Architecture::Ada => ".fwsignature_ad10x",
-            gpu::Architecture::Blackwell => ".fwsignature_gb10x",
-            _ => return Err(ENOTSUPP),
-        };
+        let gsp_sigs_section = get_signature_section(chipset)?;
         let gsp_sigs = elf_section(gsp_fw.data(), gsp_sigs_section)
             .ok_or(EINVAL)
             .and_then(|data| DmaObject::from_data(dev, data))?;
+
+        Ok((gsp, gsp_sigs, gsp_desc))
+    }
+
+    pub(crate) fn new(
+        dev: &device::Device<device::Bound>,
+        sec2: &Falcon<Sec2>,
+        bar: &Bar0,
+        chipset: Chipset,
+        ver: &str,
+    ) -> Result<Firmware> {
+        let request = |name| {
+            Self::firmware_path(chipset, ver, name)
+                .and_then(|path| firmware::Firmware::request(&path, dev))
+        };
+
+        let (gsp, gsp_sigs, gsp_desc) = Self::load_gsp_firmware(dev, chipset, ver)?;
 
         Ok(Firmware {
             booter_load: request("booter_load")
