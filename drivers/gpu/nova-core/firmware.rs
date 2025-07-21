@@ -5,7 +5,6 @@
 
 use core::marker::PhantomData;
 
-use kernel::bindings;
 use kernel::device;
 use kernel::firmware;
 use kernel::prelude::*;
@@ -28,57 +27,127 @@ pub(crate) mod sec2;
 
 pub(crate) const FIRMWARE_VERSION: &str = "570.144";
 
-fn elf_section<'a, 'b>(elf: &'a [u8], name: &'b str) -> Option<&'a [u8]> {
-    let hdr = elf
-        .get(0..size_of::<bindings::elf64_hdr>())
-        .map(|slice| slice.as_ptr())
-        .filter(|ptr| ptr.align_offset(align_of::<bindings::elf64_hdr>()) == 0)
-        // SAFETY:
-        // * `get` guarantees that the slice is within the bounds of `elf` and of the size of
-        //   `elf64_hdr`.
-        // * We checked that `ptr` had the correct alignment for `elf64_hdr`.
-        .map(|ptr| unsafe { &*ptr.cast::<bindings::elf64_hdr>() })?;
+trait ElfSectionHeader {
+    fn sh_name(&self) -> u32;
+    fn sh_offset(&self) -> u64;
+    fn sh_size(&self) -> u64;
+}
 
-    let shdr_off = hdr.e_shoff as usize;
-    let shdr_num = hdr.e_shnum as usize;
-    let shdr = elf
-        .get(shdr_off..shdr_off + size_of::<bindings::elf64_shdr>() * shdr_num)
-        .map(|slice| slice.as_ptr())
-        .filter(|ptr| ptr.align_offset(align_of::<bindings::elf64_shdr>()) == 0)
-        // SAFETY:
-        // * `get` guarantees that the slice is within the bounds of `elf` and of size
-        //   `elf64_shdr * shdr_num`.
-        // * We checked that `ptr` had the correct alignment for `elf64_shdr`.
-        .map(|ptr| unsafe {
-            core::slice::from_raw_parts(ptr.cast::<bindings::elf64_shdr>(), shdr_num)
-        })?;
+impl ElfSectionHeader for kernel::bindings::elf32_shdr {
+    fn sh_name(&self) -> u32 {
+        self.sh_name
+    }
 
-    // Get the strings table.
-    let strhdr = shdr.get(hdr.e_shstrndx as usize)?;
+    fn sh_offset(&self) -> u64 {
+        self.sh_offset as u64
+    }
 
-    // Find the section which name matches `name` and return it.
-    shdr.iter()
-        .find(|sh| {
-            let name_idx = strhdr.sh_offset as usize + sh.sh_name as usize;
+    fn sh_size(&self) -> u64 {
+        self.sh_size as u64
+    }
+}
 
-            // Get the start of the name.
-            elf.get(name_idx..)
-                // Stop at the first `0`.
-                .and_then(|nstr| nstr.get(0..=nstr.iter().position(|b| *b == 0)?))
-                // Convert into CStr. This should never fail because of the line above.
-                .and_then(|nstr| CStr::from_bytes_with_nul(nstr).ok())
-                // Convert into str.
-                .and_then(|c_str| c_str.to_str().ok())
-                // Check that the name matches.
-                .map(|str| str == name)
-                .unwrap_or(false)
-        })
-        // Return the slice containing the section.
-        .and_then(|sh| {
-            let start = sh.sh_offset as usize;
+impl ElfSectionHeader for kernel::bindings::elf64_shdr {
+    fn sh_name(&self) -> u32 {
+        self.sh_name
+    }
 
-            elf.get(start..start + sh.sh_size as usize)
-        })
+    fn sh_offset(&self) -> u64 {
+        self.sh_offset
+    }
+
+    fn sh_size(&self) -> u64 {
+        self.sh_size
+    }
+}
+
+/// Finds and extracts a named section from an ELF file.
+///
+/// # Parameters
+/// - `$elf`: ELF file data as `&[u8]`
+/// - `$section_name`: Name of the section to find
+/// - `$elf_class`: ELF class identifier (elf32 or elf64)
+///
+/// # Returns
+/// Section data as `&[u8]` if found, `None` if not found or invalid.
+///
+/// # Safety
+/// Uses unsafe pointer operations with bounds and alignment checks.
+macro_rules! find_elf_section {
+    ($elf:expr, $section_name:expr, $elf_class:ident) => {{
+        let elf = $elf;
+        let name = $section_name;
+
+        kernel::macros::paste! {
+            let ehdr = elf
+                .get(0..size_of::<kernel::bindings::[<$elf_class _hdr>]>())
+                .map(|slice| slice.as_ptr())
+                .filter(|ptr| {
+                    ptr.align_offset(align_of::<kernel::bindings::[<$elf_class _hdr>]>()) == 0
+                })
+                .map(|ptr| {
+                    // SAFETY: We have verified that:
+                    // 1. The slice contains enough bytes for the header (bounds check above)
+                    // 2. The pointer is properly aligned for the header type (alignment check above)
+                    // 3. The cast is to the correct ELF header type based on ELF class
+                    unsafe { &*ptr.cast::<kernel::bindings::[<$elf_class _hdr>]>() }
+                })?;
+
+            let shdr_off = ehdr.e_shoff as usize;
+            let shdr_num = ehdr.e_shnum as usize;
+            let shdr_size = size_of::<kernel::bindings::[<$elf_class _shdr>]>() * shdr_num;
+            let shdrs = elf
+                .get(shdr_off..shdr_off + shdr_size)
+                .map(|slice| slice.as_ptr())
+                .filter(|ptr| {
+                    ptr.align_offset(align_of::<kernel::bindings::[<$elf_class _shdr>]>()) == 0
+                })
+                .map(|ptr| unsafe {
+                    core::slice::from_raw_parts(
+                        ptr.cast::<kernel::bindings::[<$elf_class _shdr>]>(),
+                        shdr_num,
+                    )
+                })?;
+
+            let strhdr = shdrs.get(ehdr.e_shstrndx as usize)?;
+
+            // Find section by name: iterate through all sections and match names
+            shdrs.iter().find_map(|shdr| {
+                let name_idx = strhdr.sh_offset() as usize + shdr.sh_name() as usize;
+
+                elf.get(name_idx..)
+                    .and_then(|nstr| nstr.get(0..=nstr.iter().position(|b| *b == 0)?))
+                    .and_then(|nstr| CStr::from_bytes_with_nul(nstr).ok())
+                    .and_then(|c_str| c_str.to_str().ok())
+                    .filter(|str| *str == name)
+                    .and_then(|_| {
+                        let start = shdr.sh_offset() as usize;
+                        let size = shdr.sh_size() as usize;
+                        elf.get(start..start + size)
+                    })
+            })
+        }
+    }};
+}
+
+pub(crate) fn elf_section<'a, 'b>(elf: &'a [u8], section_name: &'b str) -> Option<&'a [u8]> {
+    // Check ELF magic
+    if elf.len() < 5 || &elf[0..4] != b"\x7fELF" {
+        return None;
+    }
+
+    let class = elf[4];
+    match class {
+        1 => {
+            // ELF32
+            find_elf_section!(elf, section_name, elf32)
+        }
+        2 => {
+            // ELF64
+            find_elf_section!(elf, section_name, elf64)
+        }
+        _ => None,
+    }
 }
 
 /// Structure encapsulating the firmware blobs required for the GPU to operate.
