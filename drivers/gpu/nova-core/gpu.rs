@@ -11,6 +11,7 @@ use crate::firmware::fwsec::{FwsecCommand, FwsecFirmware};
 use crate::firmware::{Firmware, FIRMWARE_VERSION};
 use crate::gfw;
 use crate::gsp::{self, GspMemObjects};
+use crate::irq;
 use crate::nvfw::r570_144 as fw;
 use crate::regs;
 use crate::util;
@@ -465,6 +466,10 @@ impl Gpu {
             gsp_info.h_internal_device,
             gsp_info.h_internal_subdevice
         );
+
+        if let Err(e) = irq::dump_table(&mut libos.cmdq, &gsp_info, pdev.as_ref()) {
+            dev_err!(pdev.as_ref(), "Failed to dump IRQ table: {:?}\n", e);
+        }
 
         Ok(pin_init!(Self {
             spec,
