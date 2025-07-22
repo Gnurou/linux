@@ -386,9 +386,17 @@ impl Gpu {
             Some(libos_handle as u32),
             Some((libos_handle >> 32) as u32),
         )?;
-        dev_info!(pdev.as_ref(), "MBOX: {:#x},{:#x}\n", mbox0, mbox1,);
+        dev_info!(
+            pdev.as_ref(),
+            "GSP MBOX0: {:#x}, MBOX1: {:#x}\n",
+            mbox0,
+            mbox1
+        );
 
-        pr_info!("Trying to run Booter loader...\n");
+        dev_info!(
+            pdev.as_ref(),
+            "Using SEC2 to load and run the booter_load firmware...\n"
+        );
 
         sec2_falcon.reset(&bar)?;
         sec2_falcon.dma_load(&bar, &fw.booter_load)?;
@@ -397,7 +405,12 @@ impl Gpu {
             Some(wpr_handle as u32),
             Some((wpr_handle >> 32) as u32),
         )?;
-        dev_info!(pdev.as_ref(), "MBOX: {:#x},{:#x}\n", mbox0, mbox1,);
+        dev_info!(
+            pdev.as_ref(),
+            "SEC2 MBOX0: {:#x}, MBOX1{:#x}\n",
+            mbox0,
+            mbox1
+        );
 
         // Match what Nouveau does here:
         gsp_falcon.write_os_version(&bar, fw.gsp_desc.app_version())?;
