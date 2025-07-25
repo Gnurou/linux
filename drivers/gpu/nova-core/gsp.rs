@@ -4,6 +4,8 @@ use core::alloc::Layout;
 use core::mem::{offset_of, MaybeUninit};
 
 use kernel::alloc::allocator::Kmalloc;
+use kernel::alloc::flags::GFP_KERNEL;
+use kernel::alloc::kvec::KVec;
 use kernel::alloc::Allocator;
 use kernel::asm;
 use kernel::bindings;
@@ -88,11 +90,20 @@ pub(crate) trait GspCommand: GspCommandElement {
     const FUNCTION: u32;
 }
 
+/// FB region information
+#[derive(Debug, Default, Copy, Clone)]
+pub(crate) struct FbRegion {
+    pub addr: u64,
+    pub size: u64,
+}
+
 pub(crate) struct GspStaticConfigInfo {
     pub gpu_name: [u8; 40],
     pub h_internal_client: u32,
     pub h_internal_device: u32,
     pub h_internal_subdevice: u32,
+    pub fb_regions: KVec<FbRegion>,
+    pub fb_region_count: usize,
 }
 
 impl GspMessageElement for GspStaticConfigInfo {
@@ -126,11 +137,48 @@ impl GspMessageElement for GspStaticConfigInfo {
         gpu_name[..copy_len].copy_from_slice(&bytes[..copy_len]);
         gpu_name[copy_len] = b'\0';
 
+        // Parse FB regions
+        let mut fb_regions = KVec::new();
+        let fb_info = &static_info.fbRegionInfoParams;
+
+        // TODO: Need to use dev_dbg
+        pr_info!("nova: Found {} FB regions\n", fb_info.numFBRegions);
+
+        for i in 0..fb_info.numFBRegions as usize {
+            if i >= 16 {
+                break;
+            } // Max regions in the array
+            let region = &fb_info.fbRegion[i];
+
+            // TODO: Need to use dev_dbg
+            pr_info!("nova: FB region {}: base={:#x} limit={:#x} reserved={:#x} compressed={} iso={} protected={}\n",
+                i, region.base, region.limit, region.reserved,
+                region.supportCompressed, region.supportISO, region.bProtected);
+
+            // Only add usable regions (not reserved, not protected, supports compression and ISO)
+            if region.reserved == 0 && region.bProtected == 0 {
+                if region.supportCompressed != 0 && region.supportISO != 0 {
+                    let size = (region.limit + 1) - region.base;
+                    fb_regions.push(
+                        FbRegion {
+                            addr: region.base,
+                            size,
+                        },
+                        GFP_KERNEL,
+                    )?;
+                }
+            }
+        }
+
+        let fb_region_count = fb_regions.len();
+
         Ok(GspStaticConfigInfo {
             gpu_name,
             h_internal_client: static_info.hInternalClient,
             h_internal_device: static_info.hInternalDevice,
             h_internal_subdevice: static_info.hInternalSubdevice,
+            fb_regions,
+            fb_region_count,
         })
     }
 }
