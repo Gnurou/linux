@@ -104,6 +104,8 @@ pub(crate) struct GspStaticConfigInfo {
     pub h_internal_subdevice: u32,
     pub fb_regions: KVec<FbRegion>,
     pub fb_region_count: usize,
+    pub bar1_pdb: u64,
+    pub bar2_pdb: u64,
 }
 
 impl GspMessageElement for GspStaticConfigInfo {
@@ -179,6 +181,8 @@ impl GspMessageElement for GspStaticConfigInfo {
             h_internal_subdevice: static_info.hInternalSubdevice,
             fb_regions,
             fb_region_count,
+            bar1_pdb: static_info.bar1PdeBase,
+            bar2_pdb: static_info.bar2PdeBase,
         })
     }
 }
