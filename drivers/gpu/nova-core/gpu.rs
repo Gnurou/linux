@@ -469,6 +469,12 @@ impl Gpu {
                 i, region.addr, region.size, region.size / (1024 * 1024)
             );
         }
+        dev_info!(
+            pdev.as_ref(),
+            "BAR page directories: BAR1_PDB={:#x} BAR2_PDB={:#x}\n",
+            gsp_info.bar1_pdb,
+            gsp_info.bar2_pdb
+        );
         dev_dbg!(
             pdev.as_ref(),
             "GSP Handles: Client={:#x}, Device={:#x}, Subdevice={:#x}\n",
