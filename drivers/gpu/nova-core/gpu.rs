@@ -457,6 +457,18 @@ impl Gpu {
             "GPU name: {}\n",
             util::str_from_null_terminated(&gsp_info.gpu_name)
         );
+        dev_info!(
+            pdev.as_ref(),
+            "FB regions: {} usable regions found\n",
+            gsp_info.fb_region_count
+        );
+        for (i, region) in gsp_info.fb_regions.iter().enumerate() {
+            dev_info!(
+                pdev.as_ref(),
+                "  Region {}: addr={:#x} size={:#x} ({} MB)\n",
+                i, region.addr, region.size, region.size / (1024 * 1024)
+            );
+        }
         dev_dbg!(
             pdev.as_ref(),
             "GSP Handles: Client={:#x}, Device={:#x}, Subdevice={:#x}\n",
