@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 //
 // Common RM API implementation for nova-core
-// Provides generic infrastructure for common RM operations.
+// Provides generic infrastructure for RM control and RM alloc operations.
 
 use crate::gsp::{GspCmdq, GspCommandElement, GspMessageElement, GspStaticConfigInfo};
 use crate::sbuffer::SBuffer;
