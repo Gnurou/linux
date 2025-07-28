@@ -64,6 +64,7 @@ mod firmware;
 mod gfw;
 mod gpu;
 mod gsp;
+mod mm;
 mod nvfw;
 mod regs;
 mod sbuffer;
