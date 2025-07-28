@@ -42,11 +42,19 @@ impl NV_PMC_BOOT_0 {
     }
 }
 
-// PBUS
+// PBUS - PBUS is a bus control unit, that helps the GPU communicate with the PCI bus.
+// Handles the BAR windows, decoding of MMIO read/writes on the BARs, etc.
 
 // TODO[REGA]: this is an array of registers.
 register!(NV_PBUS_SW_SCRATCH_0E@0x00001438  {
     31:16   frts_err_code as u16;
+});
+
+// BAR0 window control register to configure the BAR0 window for PRAMIN access
+// (direct physical VRAM access).
+register!(NV_PBUS_BAR0_WINDOW @ 0x00001700, "BAR0 window control register" {
+    23:0    window_base as u32, "Window base address (bits 39:16 of FB addr)";
+    25:24   target as u8, "Target memory space";
 });
 
 // PFB
