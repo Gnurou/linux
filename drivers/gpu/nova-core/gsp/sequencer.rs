@@ -395,7 +395,7 @@ impl<'a> GspSequencer<'a> {
     ) -> Result<Self> {
         // Receive the sequencer info from the GSP command queue
         let seq_info = crate::util::wait_on_result(timeout, || {
-            match cmdq.receive(fw::NV_VGPU_MSG_EVENT_GSP_RUN_CPU_SEQUENCER) {
+            match cmdq.receive(dev, fw::NV_VGPU_MSG_EVENT_GSP_RUN_CPU_SEQUENCER) {
                 Ok(seq_info) => Some(Ok(seq_info)),
                 Err(EAGAIN) => None,
                 Err(e) => Some(Err(e)),

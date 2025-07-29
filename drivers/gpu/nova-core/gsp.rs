@@ -415,7 +415,12 @@ impl GspCmdq {
         }
     }
 
-    pub(crate) fn send<A: GspCommand>(&mut self, bar: &Bar0, cmd: &A) -> Result<()> {
+    pub(crate) fn send<A: GspCommand>(
+        &mut self,
+        dev: &device::Device<device::Bound>,
+        bar: &Bar0,
+        cmd: &A,
+    ) -> Result<()> {
         let mut msg_header = GspMsgHeader {
             auth_tag_buffer: [0; 16],
             aad_buffer: [0; 16],
@@ -437,6 +442,17 @@ impl GspCmdq {
 
         self.seq += 1;
         let cmd_len = size_of::<GspMsgHeader>() + rpc.length as usize;
+
+        // Log RPC send with message type decoding
+        dev_dbg!(
+            dev,
+            "GSP RPC: send: Call {} - used_pages={}, function=0x{:x} ({}), header_size={}\n",
+            self.seq - 1,
+            cmd_len.div_ceil(GSP_PAGE_SIZE),
+            A::FUNCTION,
+            decode_gsp_function(A::FUNCTION),
+            size_of::<GspMsgHeader>() + size_of::<GspRpcHeader>()
+        );
 
         // `alloc_cmd_sbuffer` returns the two slices we need, and we build a SRead/Write buffer
         // from them.
@@ -479,7 +495,11 @@ impl GspCmdq {
         Ok(())
     }
 
-    pub(crate) fn receive<A: GspMessageElement>(self: &mut Self, function: u32) -> Result<A> {
+    pub(crate) fn receive<A: GspMessageElement>(
+        self: &mut Self,
+        dev: &device::Device<device::Bound>,
+        function: u32,
+    ) -> Result<A> {
         const HEADER_SIZE: u32 = (size_of::<GspMsgHeader>() + size_of::<GspRpcHeader>()) as u32;
 
         // Used pages contains the total number of pages available to consume
@@ -517,6 +537,17 @@ impl GspCmdq {
         // rpc.length includes the size of the GspRpcHeader. Remove it to make
         // the rest of the code a bit easier to follow.
         let rpc_length = rpc.length - size_of::<GspRpcHeader>() as u32;
+
+        // Log RPC receive with message type decoding
+        dev_dbg!(
+            dev,
+            "GSP RPC: receive: Call {} - used_pages={}, function=0x{:x} ({}), header_size={}\n",
+            rpc.sequence,
+            used_pages,
+            rpc.function,
+            decode_gsp_function(rpc.function),
+            HEADER_SIZE
+        );
 
         // Not all pages of the message have made it to the queue so bail and let the caller retry.
         if used_pages << GSP_PAGE_SHIFT < HEADER_SIZE + rpc_length {
@@ -565,10 +596,11 @@ impl GspCmdq {
     /// `function` parameter.
     fn receive_wait_ignore<R: GspMessageElement>(
         &mut self,
+        dev: &device::Device<device::Bound>,
         timeout: Delta,
         function: u32,
     ) -> Result<R> {
-        wait_on_result(timeout, || match self.receive::<R>(function) {
+        wait_on_result(timeout, || match self.receive::<R>(dev, function) {
             Ok(x) => Some(Ok(x)),
             Err(EAGAIN) => None,
             Err(ERANGE) => None,
@@ -578,27 +610,42 @@ impl GspCmdq {
 
     /// Wait to receive a message matching `function`. If a different message is
     /// in the queue this will return `Err(ERANGE)`.
-    fn receive_wait<R: GspMessageElement>(&mut self, timeout: Delta, function: u32) -> Result<R> {
-        wait_on_result(timeout, || match self.receive::<R>(function) {
+    fn receive_wait<R: GspMessageElement>(
+        &mut self,
+        dev: &device::Device<device::Bound>,
+        timeout: Delta,
+        function: u32,
+    ) -> Result<R> {
+        wait_on_result(timeout, || match self.receive::<R>(dev, function) {
             Ok(x) => Some(Ok(x)),
             Err(EAGAIN) => None,
             Err(e) => Some(Err(e)),
         })
     }
 
-    pub(crate) fn gsp_init_done(&mut self, timeout: Delta) -> Result {
-        self.receive_wait_ignore::<EmptyCmd>(timeout, fw::NV_VGPU_MSG_EVENT_GSP_INIT_DONE)
+    pub(crate) fn gsp_init_done(
+        &mut self,
+        dev: &device::Device<device::Bound>,
+        timeout: Delta,
+    ) -> Result {
+        self.receive_wait_ignore::<EmptyCmd>(dev, timeout, fw::NV_VGPU_MSG_EVENT_GSP_INIT_DONE)
             .map(|_| ())
     }
 
-    pub(crate) fn get_gsp_info(&mut self, bar: &Bar0) -> Result<GspStaticConfigInfo> {
+    pub(crate) fn get_gsp_info(
+        &mut self,
+        dev: &device::Device<device::Bound>,
+        bar: &Bar0,
+    ) -> Result<GspStaticConfigInfo> {
         self.send(
+            dev,
             bar,
             &GetGspStaticInfo(EmptyCmd {
                 size: size_of::<fw::GspStaticConfigInfo_t>(),
             }),
         )?;
         self.receive_wait::<GspStaticConfigInfo>(
+            dev,
             Delta::from_secs(5),
             fw::NV_VGPU_MSG_FUNCTION_GET_GSP_STATIC_INFO,
         )
@@ -853,7 +900,7 @@ impl GspCommand for RegistryTable {
     const FUNCTION: u32 = fw::NV_VGPU_MSG_FUNCTION_SET_REGISTRY;
 }
 
-fn build_registry(bar: &Bar0, cmdq: &mut GspCmdq) {
+fn build_registry(dev: &device::Device<device::Bound>, bar: &Bar0, cmdq: &mut GspCmdq) {
     let registry = RegistryTable {
         entries: [
             RegistryEntry {
@@ -867,7 +914,7 @@ fn build_registry(bar: &Bar0, cmdq: &mut GspCmdq) {
         ],
     };
 
-    cmdq.send(bar, &registry).unwrap();
+    cmdq.send(dev, bar, &registry).unwrap();
 }
 
 impl GspCommand for fw::GspSystemInfo {
@@ -895,7 +942,7 @@ fn set_system_info(dev: &pci::Device<device::Bound>, bar: &Bar0, cmdq: &mut GspC
     info.bIsPrimary = 0;
     info.bPreserveVideoMemoryAllocations = 0;
 
-    cmdq.send(bar, &info)?;
+    cmdq.send(dev.as_ref(), bar, &info)?;
     Ok(())
 }
 
@@ -960,7 +1007,7 @@ impl GspMemObjects {
         dma_write!(rmargs[0].bDmemStack = 1)?;
 
         set_system_info(pdev, bar, &mut cmdq)?;
-        build_registry(bar, &mut cmdq);
+        build_registry(dev, bar, &mut cmdq);
 
         Ok(GspMemObjects {
             libos,
@@ -974,5 +1021,44 @@ impl GspMemObjects {
 
     pub(crate) fn libos_dma_handle(&self) -> bindings::dma_addr_t {
         self.libos.dma_handle()
+    }
+}
+
+/// Decode GSP function code to human-readable message type name
+fn decode_gsp_function(function: u32) -> &'static str {
+    match function {
+        // Common function codes
+        fw::NV_VGPU_MSG_FUNCTION_NOP => "NOP",
+        fw::NV_VGPU_MSG_FUNCTION_SET_GUEST_SYSTEM_INFO => "SET_GUEST_SYSTEM_INFO",
+        fw::NV_VGPU_MSG_FUNCTION_ALLOC_ROOT => "ALLOC_ROOT",
+        fw::NV_VGPU_MSG_FUNCTION_ALLOC_DEVICE => "ALLOC_DEVICE",
+        fw::NV_VGPU_MSG_FUNCTION_ALLOC_MEMORY => "ALLOC_MEMORY",
+        fw::NV_VGPU_MSG_FUNCTION_ALLOC_CTX_DMA => "ALLOC_CTX_DMA",
+        fw::NV_VGPU_MSG_FUNCTION_ALLOC_CHANNEL_DMA => "ALLOC_CHANNEL_DMA",
+        fw::NV_VGPU_MSG_FUNCTION_MAP_MEMORY => "MAP_MEMORY",
+        fw::NV_VGPU_MSG_FUNCTION_BIND_CTX_DMA => "BIND_CTX_DMA",
+        fw::NV_VGPU_MSG_FUNCTION_ALLOC_OBJECT => "ALLOC_OBJECT",
+        fw::NV_VGPU_MSG_FUNCTION_FREE => "FREE",
+        fw::NV_VGPU_MSG_FUNCTION_LOG => "LOG",
+        fw::NV_VGPU_MSG_FUNCTION_GET_GSP_STATIC_INFO => "GET_GSP_STATIC_INFO",
+        fw::NV_VGPU_MSG_FUNCTION_SET_REGISTRY => "SET_REGISTRY",
+        fw::NV_VGPU_MSG_FUNCTION_GSP_SET_SYSTEM_INFO => "GSP_SET_SYSTEM_INFO",
+        fw::NV_VGPU_MSG_FUNCTION_GSP_INIT_POST_OBJGPU => "GSP_INIT_POST_OBJGPU",
+        fw::NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL => "GSP_RM_CONTROL",
+        fw::NV_VGPU_MSG_FUNCTION_GET_STATIC_INFO => "GET_STATIC_INFO",
+
+        // Event codes
+        fw::NV_VGPU_MSG_EVENT_GSP_INIT_DONE => "INIT_DONE",
+        fw::NV_VGPU_MSG_EVENT_GSP_RUN_CPU_SEQUENCER => "RUN_CPU_SEQUENCER",
+        fw::NV_VGPU_MSG_EVENT_POST_EVENT => "POST_EVENT",
+        fw::NV_VGPU_MSG_EVENT_RC_TRIGGERED => "RC_TRIGGERED",
+        fw::NV_VGPU_MSG_EVENT_MMU_FAULT_QUEUED => "MMU_FAULT_QUEUED",
+        fw::NV_VGPU_MSG_EVENT_OS_ERROR_LOG => "OS_ERROR_LOG",
+        fw::NV_VGPU_MSG_EVENT_GSP_POST_NOCAT_RECORD => "NOCAT",
+        fw::NV_VGPU_MSG_EVENT_GSP_LOCKDOWN_NOTICE => "LOCKDOWN_NOTICE",
+        fw::NV_VGPU_MSG_EVENT_UCODE_LIBOS_PRINT => "LIBOS_PRINT",
+
+        // Default for unknown codes
+        _ => "UNKNOWN",
     }
 }
