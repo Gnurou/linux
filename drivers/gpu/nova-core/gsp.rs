@@ -24,7 +24,8 @@ use crate::fb::FbLayout;
 use crate::firmware::Firmware;
 use crate::nvfw::r570_144 as fw;
 use crate::regs::NV_PGSP_QUEUE_HEAD;
-use crate::sbuffer::{SBuffer, SBufferIteratorMut};
+use crate::sbuffer::SBuffer;
+use crate::util::wait_on_result;
 
 pub(crate) mod sequencer;
 
@@ -50,26 +51,26 @@ unsafe impl FromBytesSized for fw::GspStaticConfigInfo_t {}
 // message which is only converted to bytes when actually doing the call. See the
 // registry for an example.
 pub(crate) trait GspMessageElement: Sized {
-    fn new_from_sbuf(sbuf: &SBuffer<'_>) -> Result<Self>;
+    fn new_from_sbuf<'a, I: Iterator<Item = &'a [u8]>>(sbuf: &mut SBuffer<I>) -> Result<Self>;
 }
 
 impl<T> GspMessageElement for T
 where
     T: Sized + FromBytes,
 {
-    fn new_from_sbuf(sbuf: &SBuffer<'_>) -> Result<Self> {
+    fn new_from_sbuf<'a, I: Iterator<Item = &'a [u8]>>(sbuf: &mut SBuffer<I>) -> Result<Self> {
         return unsafe {
             let mut result = MaybeUninit::<Self>::uninit();
             let result_ptr = result.as_mut_ptr() as *mut u8;
             let result_slice = core::slice::from_raw_parts_mut(result_ptr, size_of::<Self>());
-            sbuf.read(0, result_slice)?;
+            sbuf.read_exact(result_slice)?;
             Ok(result.assume_init())
         };
     }
 }
 
 pub(crate) trait GspCommandElement {
-    fn copy_to_sbuf(&self, sbuf: &mut SBufferIteratorMut<'_, '_>) -> Result;
+    fn copy_to_sbuf<'a, I: Iterator<Item = &'a mut [u8]>>(&self, sbuf: &mut SBuffer<I>) -> Result;
     fn size(&self) -> usize;
 }
 
@@ -77,8 +78,8 @@ impl<T> GspCommandElement for T
 where
     T: Sized + AsBytes,
 {
-    fn copy_to_sbuf(&self, sbuf: &mut SBufferIteratorMut<'_, '_>) -> Result {
-        sbuf.write_slice(self.as_bytes())
+    fn copy_to_sbuf<'a, I: Iterator<Item = &'a mut [u8]>>(&self, sbuf: &mut SBuffer<I>) -> Result {
+        sbuf.write_all(self.as_bytes())
     }
 
     fn size(&self) -> usize {
@@ -109,16 +110,8 @@ pub(crate) struct GspStaticConfigInfo {
 }
 
 impl GspMessageElement for GspStaticConfigInfo {
-    fn new_from_sbuf(sbuf: &SBuffer<'_>) -> Result<Self> {
-        if size_of::<fw::GspStaticConfigInfo_t>() < sbuf.total_bytes {
-            return Err(EINVAL);
-        }
-
-        // SAFETY: We have confirmed the static info fits in the SBuffer
-        let static_info = unsafe {
-            let static_info_ptr = sbuf.as_ptr::<fw::GspStaticConfigInfo_t>(0)?;
-            &*static_info_ptr
-        };
+    fn new_from_sbuf<'a, I: Iterator<Item = &'a [u8]>>(sbuf: &mut SBuffer<I>) -> Result<Self> {
+        let static_info = fw::GspStaticConfigInfo_t::new_from_sbuf(sbuf)?;
 
         let gpu_name_str = static_info
             .gpuNameString
@@ -445,30 +438,30 @@ impl GspCmdq {
         };
 
         self.seq += 1;
+        let cmd_len = size_of::<GspMsgHeader>() + rpc.length as usize;
 
         // `alloc_cmd_sbuffer` returns the two slices we need, and we build a SRead/Write buffer
         // from them.
-        let (slice1, slice2) = self.alloc_cmd_sbuffer(
-            size_of::<GspMsgHeader>() + size_of::<GspRpcHeader>() + cmd.size() as usize,
-        )?;
+        let (slice1, slice2) = self.alloc_cmd_sbuffer(cmd_len)?;
 
-        let mut sbuf = SBuffer::new((slice1, Some(slice2)))?;
+        let mut sbuf = SBuffer::new_writer([&mut slice1[..], &mut slice2[..]]);
 
-        let mut sbuf_iter = sbuf.iter_mut();
-        sbuf_iter.write_slice(msg_header.as_bytes())?;
-        sbuf_iter.write_slice(rpc.as_bytes())?;
-        cmd.copy_to_sbuf(&mut sbuf_iter)?;
+        sbuf.write_all(msg_header.as_bytes())?;
+        sbuf.write_all(rpc.as_bytes())?;
+        cmd.copy_to_sbuf(&mut sbuf)?;
+        drop(sbuf);
 
         msg_header.checksum = 0;
-        let total_size = sbuf.total_bytes;
-        msg_header.elem_count = total_size.div_ceil(GSP_PAGE_SIZE) as u32;
+        msg_header.elem_count = cmd_len.div_ceil(GSP_PAGE_SIZE) as u32;
 
         // Calculate checksum over the entire message
-        msg_header.checksum = GspCmdq::calculate_checksum(sbuf.iter());
+        msg_header.checksum =
+            GspCmdq::calculate_checksum(SBuffer::new_reader([&slice1[..], &slice2[..]]));
 
         // Re-write the message header with the updated element count and checksum
-        let mut sbuf = SBuffer::new((slice1, Some(slice2)))?;
-        sbuf.write(0, msg_header.as_bytes())?;
+        let mut sbuf = SBuffer::new_writer([slice1, slice2]);
+        sbuf.write_all(msg_header.as_bytes())?;
+        drop(sbuf);
 
         let mut wptr = self.cpu_wptr().unwrap() as u32;
         wptr += msg_header.elem_count as u32;
@@ -532,25 +525,26 @@ impl GspCmdq {
             return Err(EAGAIN);
         }
 
-        let sbuf = if rpc_length + HEADER_SIZE < remaining {
-            SBuffer::new((
-                &mut msg_slice[(HEADER_SIZE as usize)..(HEADER_SIZE + rpc_length) as usize],
-                None,
-            ))?
+        let result = if rpc.length + HEADER_SIZE < remaining {
+            let mut sbuf = SBuffer::new_reader([
+                &msg_slice[(HEADER_SIZE as usize)..(HEADER_SIZE + rpc.length) as usize]
+            ]);
+            A::new_from_sbuf(&mut sbuf)
         } else {
-            let slice_1 =
-                &mut msg_slice[(HEADER_SIZE as usize)..(HEADER_SIZE + remaining) as usize];
-            let ptr = unsafe {
-                core::ptr::addr_of_mut!((*self.gsp_mem.start_ptr_mut()).gspq.msgq.data[0])
-            };
+            let slice_1 = &msg_slice[(HEADER_SIZE as usize)..(HEADER_SIZE + remaining) as usize];
+            let ptr =
+                unsafe { core::ptr::addr_of!((*self.gsp_mem.start_ptr_mut()).gspq.msgq.data[0]) };
             let slice_2 = unsafe {
-                core::slice::from_raw_parts_mut(ptr as *mut u8, rpc_length as usize - slice_1.len())
+                core::slice::from_raw_parts(ptr as *const u8, rpc.length as usize - slice_1.len())
             };
-            SBuffer::new((slice_1, Some(slice_2)))?
+
+            let mut sbuf = SBuffer::new_reader([slice_1, slice_2]);
+
+            A::new_from_sbuf(&mut sbuf)
         };
 
         let result = if rpc.function == function {
-            Ok(A::new_from_sbuf(&sbuf)?)
+            result
         } else {
             Err(ERANGE)
         };
@@ -618,10 +612,8 @@ struct EmptyCmd {
 }
 
 impl GspMessageElement for EmptyCmd {
-    fn new_from_sbuf(sbuf: &SBuffer<'_>) -> Result<Self> {
-        Ok(Self {
-            size: sbuf.total_bytes,
-        })
+    fn new_from_sbuf<'a, I: Iterator<Item = &'a [u8]>>(sbuf: &mut SBuffer<I>) -> Result<Self> {
+        Ok(Self { size: sbuf.count() })
     }
 }
 
@@ -630,9 +622,9 @@ impl GspCommandElement for EmptyCmd {
         self.size
     }
 
-    fn copy_to_sbuf(&self, sbuf: &mut SBufferIteratorMut<'_, '_>) -> Result {
+    fn copy_to_sbuf<'a, I: Iterator<Item = &'a mut [u8]>>(&self, sbuf: &mut SBuffer<I>) -> Result {
         for _i in 0..self.size {
-            sbuf.write_byte(0)?;
+            sbuf.write_all(&[0])?;
         }
 
         Ok(())
@@ -641,7 +633,7 @@ impl GspCommandElement for EmptyCmd {
 
 struct GetGspStaticInfo(EmptyCmd);
 impl GspCommandElement for GetGspStaticInfo {
-    fn copy_to_sbuf(&self, sbuf: &mut SBufferIteratorMut<'_, '_>) -> Result {
+    fn copy_to_sbuf<'a, I: Iterator<Item = &'a mut [u8]>>(&self, sbuf: &mut SBuffer<I>) -> Result {
         self.0.copy_to_sbuf(sbuf)
     }
 
@@ -789,7 +781,7 @@ struct RegistryTable {
 }
 
 impl GspCommandElement for RegistryTable {
-    fn copy_to_sbuf(&self, sbuf: &mut SBufferIteratorMut<'_, '_>) -> Result {
+    fn copy_to_sbuf<'a, I: Iterator<Item = &'a mut [u8]>>(&self, sbuf: &mut SBuffer<I>) -> Result {
         let total_size = self.size();
         let align = core::mem::align_of::<fw::PACKED_REGISTRY_TABLE>();
         let layout = Layout::from_size_align(total_size, align)
@@ -835,7 +827,7 @@ impl GspCommandElement for RegistryTable {
             core::slice::from_raw_parts(ptr as *const u8, layout.size())
         };
 
-        sbuf.write_slice(cmd_slice)?;
+        sbuf.write_all(cmd_slice)?;
 
         // Free the allocated memory by converting slice back to pointer.
         unsafe {
