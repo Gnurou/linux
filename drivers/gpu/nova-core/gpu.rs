@@ -484,7 +484,7 @@ impl Gpu {
             gsp_info.h_internal_subdevice
         );
 
-        if let Err(e) = irq::dump_table(&mut libos.cmdq, &gsp_info, pdev.as_ref()) {
+        if let Err(e) = irq::dump_table(&mut libos.cmdq, bar, &gsp_info, pdev.as_ref()) {
             dev_err!(pdev.as_ref(), "Failed to dump IRQ table: {:?}\n", e);
         }
 

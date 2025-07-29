@@ -77,6 +77,7 @@ impl RmControlMessageElement for IrqTable {
 
 pub(crate) fn dump_table<'a>(
     cmdq: &mut GspCmdq,
+    bar: &'a crate::driver::Bar0,
     gsp_info: &'a GspStaticConfigInfo,
     dev: &'a device::Device<device::Bound>,
 ) -> Result {
@@ -85,7 +86,7 @@ pub(crate) fn dump_table<'a>(
      */
     let cmdq_ref: &'a mut GspCmdq = unsafe { core::mem::transmute(cmdq) };
 
-    let mut rm_control = RmControl::new_control(cmdq_ref, gsp_info, dev);
+    let mut rm_control = RmControl::new_control(cmdq_ref, bar, gsp_info, dev);
 
     let params = IrqTableParams {
         table_len: 0,
