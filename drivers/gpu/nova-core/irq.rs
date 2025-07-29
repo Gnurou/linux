@@ -76,14 +76,14 @@ impl RmControlMessageElement for IrqTable {
 }
 
 pub(crate) fn dump_table<'a>(
-    cmdq: &mut GspCmdq<'a>,
+    cmdq: &mut GspCmdq,
     gsp_info: &'a GspStaticConfigInfo,
     dev: &'a device::Device<device::Bound>,
 ) -> Result {
     /*
      * Temporary, till the core::mem::forget hack in gpu.rs is fixed.
      */
-    let cmdq_ref: &'a mut GspCmdq<'a> = unsafe { core::mem::transmute(cmdq) };
+    let cmdq_ref: &'a mut GspCmdq = unsafe { core::mem::transmute(cmdq) };
 
     let mut rm_control = RmControl::new_control(cmdq_ref, gsp_info, dev);
 
