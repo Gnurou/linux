@@ -23,8 +23,7 @@ pub(crate) struct RmControlHeader {
 
 // SAFETY: This struct is used in FFI with the GSP firmware
 unsafe impl kernel::transmute::FromBytesSized for RmControlHeader {}
-
-impl GspMessageElement for RmControlHeader {}
+unsafe impl kernel::transmute::AsBytes for RmControlHeader {}
 
 impl RmHeader for RmControlHeader {
     fn set_client(&mut self, client: u32) {
@@ -70,6 +69,7 @@ impl<'a> RmControl<'a> {
     /// Create new RM control instance
     pub(crate) fn new_control(
         cmdq: &'a mut GspCmdq,
+        bar: &'a crate::driver::Bar0,
         gsp_info: &'a GspStaticConfigInfo,
         dev: &'a device::Device<device::Bound>,
     ) -> Self {
