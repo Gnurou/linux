@@ -186,6 +186,13 @@ impl Spec {
     }
 }
 
+/// Enum representing the different firmware architecture groups.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FirmwareArchGroup {
+    TuringAmpereAda,
+    HopperBlackwellPlus,
+}
+
 /// Structure holding the resources required to operate the GPU.
 #[pin_data(PinnedDrop)]
 pub(crate) struct Gpu {
@@ -331,23 +338,29 @@ impl Gpu {
         }
     }
 
-    pub(crate) fn new(
+    fn get_firmware_arch_group(arch: Architecture) -> FirmwareArchGroup {
+        match arch {
+            Architecture::Turing | Architecture::Ampere | Architecture::Ada => {
+                FirmwareArchGroup::TuringAmpereAda
+            }
+            Architecture::Blackwell => FirmwareArchGroup::HopperBlackwellPlus,
+            Architecture::Hopper => FirmwareArchGroup::HopperBlackwellPlus,
+        }
+    }
+
+    /// Architecture-specific initialization and GSP boot for Turing, Ampere, and Ada GPUs.
+    fn turing_ampere_ada_init_and_boot(
         pdev: &pci::Device<device::Bound>,
-        devres_bar: Devres<Bar0>,
-    ) -> Result<impl PinInit<Self>> {
+        devres_bar: &Devres<Bar0>,
+        spec: &Spec,
+    ) -> Result<(
+        Firmware,
+        SysmemFlush,
+        CoherentAllocation<fw::GspFwWprMeta>,
+        GspMemObjects,
+        gsp::GspStaticConfigInfo,
+    )> {
         let bar = devres_bar.access(pdev.as_ref())?;
-        let spec = Spec::new(bar)?;
-
-        dev_info!(
-            pdev.as_ref(),
-            "NVIDIA (Chipset: {}, Architecture: {:?}, Revision: {})\n",
-            spec.chipset,
-            spec.chipset.arch(),
-            spec.revision
-        );
-
-        pdev.as_ref().dma_set_mask((1 << 48) - 1)?;
-        pdev.as_ref().dma_set_coherent_mask((1 << 48) - 1)?;
 
         // We must wait for GFW_BOOT completion before doing any significant setup on the GPU.
         gfw::wait_gfw_boot_completion(bar)
@@ -474,7 +487,10 @@ impl Gpu {
             dev_info!(
                 pdev.as_ref(),
                 "  Region {}: addr={:#x} size={:#x} ({} MB)\n",
-                i, region.addr, region.size, region.size / (1024 * 1024)
+                i,
+                region.addr,
+                region.size,
+                region.size / (1024 * 1024)
             );
         }
         dev_info!(
@@ -490,6 +506,38 @@ impl Gpu {
             gsp_info.h_internal_device,
             gsp_info.h_internal_subdevice
         );
+
+        Ok((fw, sysmem_flush, wpr_meta, libos, gsp_info))
+    }
+
+    pub(crate) fn new(
+        pdev: &pci::Device<device::Bound>,
+        devres_bar: Devres<Bar0>,
+    ) -> Result<impl PinInit<Self>> {
+        let bar = devres_bar.access(pdev.as_ref())?;
+        let spec = Spec::new(bar)?;
+
+        dev_info!(
+            pdev.as_ref(),
+            "NVIDIA (Chipset: {}, Architecture: {:?}, Revision: {})\n",
+            spec.chipset,
+            spec.chipset.arch(),
+            spec.revision
+        );
+
+        pdev.as_ref().dma_set_mask((1 << 48) - 1)?;
+        pdev.as_ref().dma_set_coherent_mask((1 << 48) - 1)?;
+
+        let fw_arch_group = Self::get_firmware_arch_group(spec.chipset.arch());
+        let (fw, sysmem_flush, wpr_meta, libos, gsp_info) = match fw_arch_group {
+            FirmwareArchGroup::TuringAmpereAda => {
+                Self::turing_ampere_ada_init_and_boot(pdev, &devres_bar, &spec)?
+            }
+            FirmwareArchGroup::HopperBlackwellPlus => {
+                // TODO: Implement in Step 4
+                return Err(ENOTSUPP);
+            }
+        };
 
         Ok(pin_init!(Self {
             spec,
