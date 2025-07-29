@@ -39,6 +39,7 @@ unsafe impl FromBytesSized for fw::GspFwWprMeta {}
 unsafe impl AsBytes for fw::GspFwWprMeta {}
 unsafe impl FromBytesSized for fw::GspSystemInfo {}
 unsafe impl AsBytes for fw::GspSystemInfo {}
+unsafe impl FromBytesSized for fw::GspStaticConfigInfo_t {}
 
 // We provide this trait because not all our structs are Sized so therefore the
 // AsBytes and FromBytes traits don't work. However we can provide default
@@ -521,6 +522,16 @@ impl GspCmdq {
             Ok(x) => Some(Ok(x)),
             Err(EAGAIN) => None,
             Err(ERANGE) => None,
+            Err(e) => Some(Err(e)),
+        })
+    }
+
+    /// Wait to receive a message matching `function`. If a different message is
+    /// in the queue this will return `Err(ERANGE)`.
+    fn receive_wait<R: GspMessageElement>(&mut self, timeout: Delta, function: u32) -> Result<R> {
+        wait_on_result(timeout, || match self.receive::<R>(function) {
+            Ok(x) => Some(Ok(x)),
+            Err(EAGAIN) => None,
             Err(e) => Some(Err(e)),
         })
     }
