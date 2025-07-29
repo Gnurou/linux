@@ -98,20 +98,19 @@ fn calc_wpr_heap(chipset: Chipset, fb_size_gb: u64) -> u64 {
         )
     };
 
-    let size = carveout
-        + nvfw::GSP_FW_HEAP_PARAM_BASE_RM_SIZE_TU10X as u64
-        + (nvfw::GSP_FW_HEAP_PARAM_SIZE_PER_GB_FB as u64 * fb_size_gb)
-            .next_multiple_of(GSP_HEAP_SHIFT)
-        + (nvfw::GSP_FW_HEAP_PARAM_CLIENT_ALLOC_SIZE as u64).next_multiple_of(GSP_HEAP_SHIFT);
+    let base_rm_size = nvfw::GSP_FW_HEAP_PARAM_BASE_RM_SIZE_TU10X as u64;
+    let per_gb_size = (nvfw::GSP_FW_HEAP_PARAM_SIZE_PER_GB_FB as u64 * fb_size_gb)
+        .next_multiple_of(GSP_HEAP_SHIFT);
+    let client_alloc_size =
+        (nvfw::GSP_FW_HEAP_PARAM_CLIENT_ALLOC_SIZE as u64).next_multiple_of(GSP_HEAP_SHIFT);
 
-    core::cmp::max(size, heap_min as u64)
+    let calculated_size = carveout + base_rm_size + per_gb_size + client_alloc_size;
+    core::cmp::max(calculated_size, heap_min as u64)
 }
 
 /// Layout of the GPU framebuffer memory.
 ///
 /// Contains ranges of GPU memory reserved for a given purpose during the GSP boot process.
-#[derive(Debug)]
-#[expect(dead_code)]
 pub(crate) struct FbLayout {
     pub(crate) fb: Range<u64>,
     pub(crate) vga_workspace: Range<u64>,
@@ -126,6 +125,41 @@ pub(crate) struct FbLayout {
     pub(crate) region: [Range<u64>; 16],
     pub(crate) nr_region: usize,
     pub(crate) rsvd_size: u32,
+}
+
+struct RangeWithSize(Range<u64>);
+
+impl core::fmt::Debug for RangeWithSize {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        if self.0.start == 0 && self.0.end == 0 {
+            write!(f, "0x0..0x0")
+        } else {
+            let size_mb = (self.0.end - self.0.start) >> 20;
+            write!(f, "{:#x}..{:#x} ({} MB)", self.0.start, self.0.end, size_mb)
+        }
+    }
+}
+
+impl core::fmt::Debug for FbLayout {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("FbLayout")
+            .field("fb", &RangeWithSize(self.fb.clone()))
+            .field("vga_workspace", &RangeWithSize(self.vga_workspace.clone()))
+            .field("frts", &RangeWithSize(self.frts.clone()))
+            .field("boot", &RangeWithSize(self.boot.clone()))
+            .field("elf", &RangeWithSize(self.elf.clone()))
+            .field("wpr2_heap", &RangeWithSize(self.wpr2_heap.clone()))
+            .field(
+                "vf_partition_count",
+                &format_args!("{:#x}", self.vf_partition_count),
+            )
+            .field("wpr2", &RangeWithSize(self.wpr2.clone()))
+            .field("heap", &RangeWithSize(self.heap.clone()))
+            .field("region", &self.region)
+            .field("nr_region", &format_args!("{:#x}", self.nr_region))
+            .field("rsvd_size", &format_args!("{:#x}", self.rsvd_size))
+            .finish()
+    }
 }
 
 impl FbLayout {

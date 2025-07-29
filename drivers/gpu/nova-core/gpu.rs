@@ -302,7 +302,7 @@ impl Gpu {
         )?;
 
         let fb_layout = FbLayout::new(spec.chipset, bar, &fw)?;
-        dev_dbg!(pdev.as_ref(), "{:#x?}\n", fb_layout);
+        dev_dbg!(pdev.as_ref(), "{:#?}\n", fb_layout);
 
         let bios = Vbios::new(pdev, bar)?;
 
