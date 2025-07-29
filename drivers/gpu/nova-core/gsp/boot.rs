@@ -126,7 +126,7 @@ impl super::Gsp {
         )?;
 
         let fb_layout = FbLayout::new(chipset, bar, &gsp_fw)?;
-        dev_dbg!(dev, "{:#x?}\n", fb_layout);
+        dev_dbg!(dev, "{:#?}\n", fb_layout);
 
         Self::run_fwsec_frts(dev, gsp_falcon, bar, &bios, &fb_layout)?;
 

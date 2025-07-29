@@ -86,7 +86,6 @@ impl SysmemFlush {
 /// Layout of the GPU framebuffer memory.
 ///
 /// Contains ranges of GPU memory reserved for a given purpose during the GSP boot process.
-#[derive(Debug)]
 pub(crate) struct FbLayout {
     /// Range of the framebuffer. Starts at `0`.
     pub(crate) fb: Range<u64>,
@@ -104,6 +103,38 @@ pub(crate) struct FbLayout {
     pub(crate) wpr2: Range<u64>,
     pub(crate) heap: Range<u64>,
     pub(crate) vf_partition_count: u8,
+}
+
+struct RangeWithSize(Range<u64>);
+
+impl core::fmt::Debug for RangeWithSize {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        if self.0.start == 0 && self.0.end == 0 {
+            write!(f, "0x0..0x0")
+        } else {
+            let size_mb = (self.0.end - self.0.start) >> 20;
+            write!(f, "{:#x}..{:#x} ({} MB)", self.0.start, self.0.end, size_mb)
+        }
+    }
+}
+
+impl core::fmt::Debug for FbLayout {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("FbLayout")
+            .field("fb", &RangeWithSize(self.fb.clone()))
+            .field("vga_workspace", &RangeWithSize(self.vga_workspace.clone()))
+            .field("frts", &RangeWithSize(self.frts.clone()))
+            .field("boot", &RangeWithSize(self.boot.clone()))
+            .field("elf", &RangeWithSize(self.elf.clone()))
+            .field("wpr2_heap", &RangeWithSize(self.wpr2_heap.clone()))
+            .field("wpr2", &RangeWithSize(self.wpr2.clone()))
+            .field("heap", &RangeWithSize(self.heap.clone()))
+            .field(
+                "vf_partition_count",
+                &format_args!("{:#x}", self.vf_partition_count),
+            )
+            .finish()
+    }
 }
 
 impl FbLayout {
