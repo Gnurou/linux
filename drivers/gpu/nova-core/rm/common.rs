@@ -3,8 +3,9 @@
 // Common RM API implementation for nova-core
 // Provides generic infrastructure for RM control and RM alloc operations.
 
-use crate::gsp::{GspCmdq, GspCommandElement, GspMessageElement, GspStaticConfigInfo};
+use crate::gsp::{GspCmdq, GspCommand, GspCommandElement, GspMessageElement, GspStaticConfigInfo};
 use crate::sbuffer::SBuffer;
+use crate::nvfw::r570_144 as fw;
 use crate::util::wait_on_result;
 use core::marker::PhantomData;
 use kernel::device;
@@ -57,6 +58,7 @@ struct RmMessage<'a, H: RmHeader> {
     params: Option<&'a [u8]>,
 }
 
+
 impl<'a, H: RmHeader> GspCommandElement for RmMessage<'a, H> {
     fn copy_to_sbuf<'b, I: Iterator<Item = &'b mut [u8]>>(&self, sbuf: &mut SBuffer<I>) -> Result {
         // Write the header
@@ -81,6 +83,40 @@ impl<'a, H: RmHeader> GspCommandElement for RmMessage<'a, H> {
     }
 }
 
+/// Wrapper for RM Control commands
+struct RmControlCmd<'a, H: RmHeader>(RmMessage<'a, H>);
+
+impl<'a, H: RmHeader> GspCommandElement for RmControlCmd<'a, H> {
+    fn copy_to_sbuf<'b, I: Iterator<Item = &'b mut [u8]>>(&self, sbuf: &mut SBuffer<I>) -> Result {
+        self.0.copy_to_sbuf(sbuf)
+    }
+
+    fn size(&self) -> usize {
+        self.0.size()
+    }
+}
+
+impl<'a, H: RmHeader> GspCommand for RmControlCmd<'a, H> {
+    const FUNCTION: u32 = fw::NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL;
+}
+
+/// Wrapper for RM Alloc commands
+struct RmAllocCmd<'a, H: RmHeader>(RmMessage<'a, H>);
+
+impl<'a, H: RmHeader> GspCommandElement for RmAllocCmd<'a, H> {
+    fn copy_to_sbuf<'b, I: Iterator<Item = &'b mut [u8]>>(&self, sbuf: &mut SBuffer<I>) -> Result {
+        self.0.copy_to_sbuf(sbuf)
+    }
+
+    fn size(&self) -> usize {
+        self.0.size()
+    }
+}
+
+impl<'a, H: RmHeader> GspCommand for RmAllocCmd<'a, H> {
+    const FUNCTION: u32 = fw::NV_VGPU_MSG_FUNCTION_GSP_RM_ALLOC;
+}
+
 /// Trait for input parameters
 pub(crate) trait RmParams {
     fn to_bytes(&self) -> &[u8];
@@ -95,6 +131,7 @@ pub(crate) trait RmResponseElement: Sized {
 /// Generic RM API struct for all RM API operations
 pub(crate) struct RmApi<'a, H: RmHeader> {
     cmdq: &'a mut GspCmdq,
+    bar: &'a crate::driver::Bar0,
     gsp_info: &'a GspStaticConfigInfo,
     dev: &'a device::Device<device::Bound>,
     function: u32,
@@ -105,12 +142,14 @@ impl<'a, H: RmHeader> RmApi<'a, H> {
     /// Create new RM API instance
     pub(crate) fn new(
         cmdq: &'a mut GspCmdq,
+        bar: &'a crate::driver::Bar0,
         gsp_info: &'a GspStaticConfigInfo,
         dev: &'a device::Device<device::Bound>,
         function: u32,
     ) -> Self {
         Self {
             cmdq,
+            bar,
             gsp_info,
             dev,
             function,
@@ -138,8 +177,21 @@ impl<'a, H: RmHeader> RmApi<'a, H> {
             params: params.map(|p| p.to_bytes()),
         };
 
-        // Send the command using GSP RPC
-        self.cmdq.send(self.function, &msg)?;
+        // Send the command using appropriate wrapper based on function
+        match self.function {
+            fw::NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL => {
+                let cmd = RmControlCmd(msg);
+                self.cmdq.send(self.bar, &cmd)?;
+            }
+            fw::NV_VGPU_MSG_FUNCTION_GSP_RM_ALLOC => {
+                let cmd = RmAllocCmd(msg);
+                self.cmdq.send(self.bar, &cmd)?;
+            }
+            _ => {
+                dev_err!(self.dev, "Unknown RM function: {:#x}\n", self.function);
+                return Err(EINVAL);
+            }
+        }
 
         dev_info!(
             self.dev,
