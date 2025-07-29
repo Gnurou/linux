@@ -35,8 +35,7 @@ pub(crate) struct RmAllocHeader {
 // SAFETY: This struct is used in FFI with the GSP firmware
 unsafe impl Zeroable for RmAllocHeader {}
 unsafe impl kernel::transmute::FromBytesSized for RmAllocHeader {}
-
-impl GspMessageElement for RmAllocHeader {}
+unsafe impl kernel::transmute::AsBytes for RmAllocHeader {}
 
 impl RmHeader for RmAllocHeader {
     fn set_client(&mut self, client: u32) {
@@ -87,6 +86,7 @@ impl<'a> RmAlloc<'a> {
     #[allow(dead_code)]
     pub(crate) fn new_alloc(
         cmdq: &'a mut GspCmdq,
+        bar: &'a crate::driver::Bar0,
         gsp_info: &'a GspStaticConfigInfo,
         dev: &'a device::Device<device::Bound>,
     ) -> Self {
