@@ -83,7 +83,7 @@
             },
             "is_proc_macro": false,
             "is_workspace_member": true,
-            "root_module": "/home/joelaf/repo/linux-nova-seq-rebase/rust/compiler_builtins.rs"
+            "root_module": "/home/joelaf/repo/linux-nova-core-unstable/rust/compiler_builtins.rs"
         },
         {
             "cfg": [],
@@ -104,8 +104,8 @@
             },
             "is_proc_macro": true,
             "is_workspace_member": true,
-            "proc_macro_dylib_path": "/home/joelaf/repo/linux-nova-seq-rebase/rust/libmacros.so",
-            "root_module": "/home/joelaf/repo/linux-nova-seq-rebase/rust/macros/lib.rs"
+            "proc_macro_dylib_path": "/home/joelaf/repo/linux-nova-core-unstable/rust/libmacros.so",
+            "root_module": "/home/joelaf/repo/linux-nova-core-unstable/rust/macros/lib.rs"
         },
         {
             "cfg": [],
@@ -126,7 +126,7 @@
             },
             "is_proc_macro": false,
             "is_workspace_member": true,
-            "root_module": "/home/joelaf/repo/linux-nova-seq-rebase/rust/build_error.rs"
+            "root_module": "/home/joelaf/repo/linux-nova-core-unstable/rust/build_error.rs"
         },
         {
             "cfg": [
@@ -140,8 +140,8 @@
             },
             "is_proc_macro": true,
             "is_workspace_member": true,
-            "proc_macro_dylib_path": "/home/joelaf/repo/linux-nova-seq-rebase/rust/libpin_init_internal.so",
-            "root_module": "/home/joelaf/repo/linux-nova-seq-rebase/rust/pin-init/internal/src/lib.rs"
+            "proc_macro_dylib_path": "/home/joelaf/repo/linux-nova-core-unstable/rust/libpin_init_internal.so",
+            "root_module": "/home/joelaf/repo/linux-nova-core-unstable/rust/pin-init/internal/src/lib.rs"
         },
         {
             "cfg": [
@@ -168,7 +168,7 @@
             },
             "is_proc_macro": false,
             "is_workspace_member": true,
-            "root_module": "/home/joelaf/repo/linux-nova-seq-rebase/rust/pin-init/src/lib.rs"
+            "root_module": "/home/joelaf/repo/linux-nova-core-unstable/rust/pin-init/src/lib.rs"
         },
         {
             "cfg": [],
@@ -189,7 +189,7 @@
             },
             "is_proc_macro": false,
             "is_workspace_member": true,
-            "root_module": "/home/joelaf/repo/linux-nova-seq-rebase/rust/ffi.rs"
+            "root_module": "/home/joelaf/repo/linux-nova-core-unstable/rust/ffi.rs"
         },
         {
             "cfg": [
@@ -529,7 +529,6 @@
                 "CONFIG_SECURITY_SAFESETID=\"y\"",
                 "CONFIG_ZSMALLOC",
                 "CONFIG_ZSMALLOC=\"y\"",
-                "CONFIG_NVIDIA_OPEN_GPU_KERNEL_PATH=\"/home/joelaf/repo/open-gpu-kernel-modules/\"",
                 "CONFIG_CRYPTO_RNG",
                 "CONFIG_CRYPTO_RNG=\"y\"",
                 "CONFIG_MFD_WM8400",
@@ -5296,17 +5295,17 @@
             "display_name": "bindings",
             "edition": "2021",
             "env": {
-                "OBJTREE": "/home/joelaf/repo/linux-nova-seq-rebase",
+                "OBJTREE": "/home/joelaf/repo/linux-nova-core-unstable",
                 "RUST_MODFILE": "This is only for rust-analyzer"
             },
             "is_proc_macro": false,
             "is_workspace_member": true,
-            "root_module": "/home/joelaf/repo/linux-nova-seq-rebase/rust/bindings/lib.rs",
+            "root_module": "/home/joelaf/repo/linux-nova-core-unstable/rust/bindings/lib.rs",
             "source": {
                 "exclude_dirs": [],
                 "include_dirs": [
-                    "/home/joelaf/repo/linux-nova-seq-rebase/rust/bindings",
-                    "/home/joelaf/repo/linux-nova-seq-rebase/rust"
+                    "/home/joelaf/repo/linux-nova-core-unstable/rust/bindings",
+                    "/home/joelaf/repo/linux-nova-core-unstable/rust"
                 ]
             }
         },
@@ -5648,7 +5647,6 @@
                 "CONFIG_SECURITY_SAFESETID=\"y\"",
                 "CONFIG_ZSMALLOC",
                 "CONFIG_ZSMALLOC=\"y\"",
-                "CONFIG_NVIDIA_OPEN_GPU_KERNEL_PATH=\"/home/joelaf/repo/open-gpu-kernel-modules/\"",
                 "CONFIG_CRYPTO_RNG",
                 "CONFIG_CRYPTO_RNG=\"y\"",
                 "CONFIG_MFD_WM8400",
@@ -10415,17 +10413,17 @@
             "display_name": "uapi",
             "edition": "2021",
             "env": {
-                "OBJTREE": "/home/joelaf/repo/linux-nova-seq-rebase",
+                "OBJTREE": "/home/joelaf/repo/linux-nova-core-unstable",
                 "RUST_MODFILE": "This is only for rust-analyzer"
             },
             "is_proc_macro": false,
             "is_workspace_member": true,
-            "root_module": "/home/joelaf/repo/linux-nova-seq-rebase/rust/uapi/lib.rs",
+            "root_module": "/home/joelaf/repo/linux-nova-core-unstable/rust/uapi/lib.rs",
             "source": {
                 "exclude_dirs": [],
                 "include_dirs": [
-                    "/home/joelaf/repo/linux-nova-seq-rebase/rust/uapi",
-                    "/home/joelaf/repo/linux-nova-seq-rebase/rust"
+                    "/home/joelaf/repo/linux-nova-core-unstable/rust/uapi",
+                    "/home/joelaf/repo/linux-nova-core-unstable/rust"
                 ]
             }
         },
@@ -10767,7 +10765,6 @@
                 "CONFIG_SECURITY_SAFESETID=\"y\"",
                 "CONFIG_ZSMALLOC",
                 "CONFIG_ZSMALLOC=\"y\"",
-                "CONFIG_NVIDIA_OPEN_GPU_KERNEL_PATH=\"/home/joelaf/repo/open-gpu-kernel-modules/\"",
                 "CONFIG_CRYPTO_RNG",
                 "CONFIG_CRYPTO_RNG=\"y\"",
                 "CONFIG_MFD_WM8400",
@@ -15554,17 +15551,17 @@
             "display_name": "kernel",
             "edition": "2021",
             "env": {
-                "OBJTREE": "/home/joelaf/repo/linux-nova-seq-rebase",
+                "OBJTREE": "/home/joelaf/repo/linux-nova-core-unstable",
                 "RUST_MODFILE": "This is only for rust-analyzer"
             },
             "is_proc_macro": false,
             "is_workspace_member": true,
-            "root_module": "/home/joelaf/repo/linux-nova-seq-rebase/rust/kernel/lib.rs",
+            "root_module": "/home/joelaf/repo/linux-nova-core-unstable/rust/kernel/lib.rs",
             "source": {
                 "exclude_dirs": [],
                 "include_dirs": [
-                    "/home/joelaf/repo/linux-nova-seq-rebase/rust/kernel",
-                    "/home/joelaf/repo/linux-nova-seq-rebase/rust"
+                    "/home/joelaf/repo/linux-nova-core-unstable/rust/kernel",
+                    "/home/joelaf/repo/linux-nova-core-unstable/rust"
                 ]
             }
         },
@@ -15906,7 +15903,6 @@
                 "CONFIG_SECURITY_SAFESETID=\"y\"",
                 "CONFIG_ZSMALLOC",
                 "CONFIG_ZSMALLOC=\"y\"",
-                "CONFIG_NVIDIA_OPEN_GPU_KERNEL_PATH=\"/home/joelaf/repo/open-gpu-kernel-modules/\"",
                 "CONFIG_CRYPTO_RNG",
                 "CONFIG_CRYPTO_RNG=\"y\"",
                 "CONFIG_MFD_WM8400",
@@ -20677,7 +20673,7 @@
             },
             "is_proc_macro": false,
             "is_workspace_member": true,
-            "root_module": "/home/joelaf/repo/linux-nova-seq-rebase/samples/rust/rust_driver_pci.rs"
+            "root_module": "/home/joelaf/repo/linux-nova-core-unstable/samples/rust/rust_driver_pci.rs"
         },
         {
             "cfg": [
@@ -21017,7 +21013,6 @@
                 "CONFIG_SECURITY_SAFESETID=\"y\"",
                 "CONFIG_ZSMALLOC",
                 "CONFIG_ZSMALLOC=\"y\"",
-                "CONFIG_NVIDIA_OPEN_GPU_KERNEL_PATH=\"/home/joelaf/repo/open-gpu-kernel-modules/\"",
                 "CONFIG_CRYPTO_RNG",
                 "CONFIG_CRYPTO_RNG=\"y\"",
                 "CONFIG_MFD_WM8400",
@@ -25788,7 +25783,7 @@
             },
             "is_proc_macro": false,
             "is_workspace_member": true,
-            "root_module": "/home/joelaf/repo/linux-nova-seq-rebase/samples/rust/rust_configfs.rs"
+            "root_module": "/home/joelaf/repo/linux-nova-core-unstable/samples/rust/rust_configfs.rs"
         },
         {
             "cfg": [
@@ -26128,7 +26123,6 @@
                 "CONFIG_SECURITY_SAFESETID=\"y\"",
                 "CONFIG_ZSMALLOC",
                 "CONFIG_ZSMALLOC=\"y\"",
-                "CONFIG_NVIDIA_OPEN_GPU_KERNEL_PATH=\"/home/joelaf/repo/open-gpu-kernel-modules/\"",
                 "CONFIG_CRYPTO_RNG",
                 "CONFIG_CRYPTO_RNG=\"y\"",
                 "CONFIG_MFD_WM8400",
@@ -30899,7 +30893,7 @@
             },
             "is_proc_macro": false,
             "is_workspace_member": true,
-            "root_module": "/home/joelaf/repo/linux-nova-seq-rebase/samples/rust/rust_driver_platform.rs"
+            "root_module": "/home/joelaf/repo/linux-nova-core-unstable/samples/rust/rust_driver_platform.rs"
         },
         {
             "cfg": [
@@ -31239,7 +31233,6 @@
                 "CONFIG_SECURITY_SAFESETID=\"y\"",
                 "CONFIG_ZSMALLOC",
                 "CONFIG_ZSMALLOC=\"y\"",
-                "CONFIG_NVIDIA_OPEN_GPU_KERNEL_PATH=\"/home/joelaf/repo/open-gpu-kernel-modules/\"",
                 "CONFIG_CRYPTO_RNG",
                 "CONFIG_CRYPTO_RNG=\"y\"",
                 "CONFIG_MFD_WM8400",
@@ -36010,7 +36003,7 @@
             },
             "is_proc_macro": false,
             "is_workspace_member": true,
-            "root_module": "/home/joelaf/repo/linux-nova-seq-rebase/samples/rust/rust_driver_auxiliary.rs"
+            "root_module": "/home/joelaf/repo/linux-nova-core-unstable/samples/rust/rust_driver_auxiliary.rs"
         },
         {
             "cfg": [
@@ -36350,7 +36343,6 @@
                 "CONFIG_SECURITY_SAFESETID=\"y\"",
                 "CONFIG_ZSMALLOC",
                 "CONFIG_ZSMALLOC=\"y\"",
-                "CONFIG_NVIDIA_OPEN_GPU_KERNEL_PATH=\"/home/joelaf/repo/open-gpu-kernel-modules/\"",
                 "CONFIG_CRYPTO_RNG",
                 "CONFIG_CRYPTO_RNG=\"y\"",
                 "CONFIG_MFD_WM8400",
@@ -41121,7 +41113,7 @@
             },
             "is_proc_macro": false,
             "is_workspace_member": true,
-            "root_module": "/home/joelaf/repo/linux-nova-seq-rebase/samples/rust/rust_driver_faux.rs"
+            "root_module": "/home/joelaf/repo/linux-nova-core-unstable/samples/rust/rust_driver_faux.rs"
         },
         {
             "cfg": [
@@ -41461,7 +41453,6 @@
                 "CONFIG_SECURITY_SAFESETID=\"y\"",
                 "CONFIG_ZSMALLOC",
                 "CONFIG_ZSMALLOC=\"y\"",
-                "CONFIG_NVIDIA_OPEN_GPU_KERNEL_PATH=\"/home/joelaf/repo/open-gpu-kernel-modules/\"",
                 "CONFIG_CRYPTO_RNG",
                 "CONFIG_CRYPTO_RNG=\"y\"",
                 "CONFIG_MFD_WM8400",
@@ -46232,7 +46223,7 @@
             },
             "is_proc_macro": false,
             "is_workspace_member": true,
-            "root_module": "/home/joelaf/repo/linux-nova-seq-rebase/samples/rust/rust_dma.rs"
+            "root_module": "/home/joelaf/repo/linux-nova-core-unstable/samples/rust/rust_dma.rs"
         },
         {
             "cfg": [
@@ -46572,7 +46563,6 @@
                 "CONFIG_SECURITY_SAFESETID=\"y\"",
                 "CONFIG_ZSMALLOC",
                 "CONFIG_ZSMALLOC=\"y\"",
-                "CONFIG_NVIDIA_OPEN_GPU_KERNEL_PATH=\"/home/joelaf/repo/open-gpu-kernel-modules/\"",
                 "CONFIG_CRYPTO_RNG",
                 "CONFIG_CRYPTO_RNG=\"y\"",
                 "CONFIG_MFD_WM8400",
@@ -51343,7 +51333,7 @@
             },
             "is_proc_macro": false,
             "is_workspace_member": true,
-            "root_module": "/home/joelaf/repo/linux-nova-seq-rebase/samples/rust/rust_misc_device.rs"
+            "root_module": "/home/joelaf/repo/linux-nova-core-unstable/samples/rust/rust_misc_device.rs"
         },
         {
             "cfg": [
@@ -51683,7 +51673,6 @@
                 "CONFIG_SECURITY_SAFESETID=\"y\"",
                 "CONFIG_ZSMALLOC",
                 "CONFIG_ZSMALLOC=\"y\"",
-                "CONFIG_NVIDIA_OPEN_GPU_KERNEL_PATH=\"/home/joelaf/repo/open-gpu-kernel-modules/\"",
                 "CONFIG_CRYPTO_RNG",
                 "CONFIG_CRYPTO_RNG=\"y\"",
                 "CONFIG_MFD_WM8400",
@@ -56454,7 +56443,7 @@
             },
             "is_proc_macro": false,
             "is_workspace_member": true,
-            "root_module": "/home/joelaf/repo/linux-nova-seq-rebase/samples/rust/rust_print_main.rs"
+            "root_module": "/home/joelaf/repo/linux-nova-core-unstable/samples/rust/rust_print_main.rs"
         },
         {
             "cfg": [
@@ -56794,7 +56783,6 @@
                 "CONFIG_SECURITY_SAFESETID=\"y\"",
                 "CONFIG_ZSMALLOC",
                 "CONFIG_ZSMALLOC=\"y\"",
-                "CONFIG_NVIDIA_OPEN_GPU_KERNEL_PATH=\"/home/joelaf/repo/open-gpu-kernel-modules/\"",
                 "CONFIG_CRYPTO_RNG",
                 "CONFIG_CRYPTO_RNG=\"y\"",
                 "CONFIG_MFD_WM8400",
@@ -61565,7 +61553,7 @@
             },
             "is_proc_macro": false,
             "is_workspace_member": true,
-            "root_module": "/home/joelaf/repo/linux-nova-seq-rebase/samples/rust/rust_minimal.rs"
+            "root_module": "/home/joelaf/repo/linux-nova-core-unstable/samples/rust/rust_minimal.rs"
         },
         {
             "cfg": [
@@ -61905,7 +61893,6 @@
                 "CONFIG_SECURITY_SAFESETID=\"y\"",
                 "CONFIG_ZSMALLOC",
                 "CONFIG_ZSMALLOC=\"y\"",
-                "CONFIG_NVIDIA_OPEN_GPU_KERNEL_PATH=\"/home/joelaf/repo/open-gpu-kernel-modules/\"",
                 "CONFIG_CRYPTO_RNG",
                 "CONFIG_CRYPTO_RNG=\"y\"",
                 "CONFIG_MFD_WM8400",
@@ -66676,7 +66663,7 @@
             },
             "is_proc_macro": false,
             "is_workspace_member": true,
-            "root_module": "/home/joelaf/repo/linux-nova-seq-rebase/drivers/net/phy/qt2025.rs"
+            "root_module": "/home/joelaf/repo/linux-nova-core-unstable/drivers/net/phy/qt2025.rs"
         },
         {
             "cfg": [
@@ -67016,7 +67003,6 @@
                 "CONFIG_SECURITY_SAFESETID=\"y\"",
                 "CONFIG_ZSMALLOC",
                 "CONFIG_ZSMALLOC=\"y\"",
-                "CONFIG_NVIDIA_OPEN_GPU_KERNEL_PATH=\"/home/joelaf/repo/open-gpu-kernel-modules/\"",
                 "CONFIG_CRYPTO_RNG",
                 "CONFIG_CRYPTO_RNG=\"y\"",
                 "CONFIG_MFD_WM8400",
@@ -71787,7 +71773,7 @@
             },
             "is_proc_macro": false,
             "is_workspace_member": true,
-            "root_module": "/home/joelaf/repo/linux-nova-seq-rebase/drivers/net/phy/ax88796b_rust.rs"
+            "root_module": "/home/joelaf/repo/linux-nova-core-unstable/drivers/net/phy/ax88796b_rust.rs"
         },
         {
             "cfg": [
@@ -72127,7 +72113,6 @@
                 "CONFIG_SECURITY_SAFESETID=\"y\"",
                 "CONFIG_ZSMALLOC",
                 "CONFIG_ZSMALLOC=\"y\"",
-                "CONFIG_NVIDIA_OPEN_GPU_KERNEL_PATH=\"/home/joelaf/repo/open-gpu-kernel-modules/\"",
                 "CONFIG_CRYPTO_RNG",
                 "CONFIG_CRYPTO_RNG=\"y\"",
                 "CONFIG_MFD_WM8400",
@@ -76898,7 +76883,7 @@
             },
             "is_proc_macro": false,
             "is_workspace_member": true,
-            "root_module": "/home/joelaf/repo/linux-nova-seq-rebase/drivers/gpu/nova-core/nova_core.rs"
+            "root_module": "/home/joelaf/repo/linux-nova-core-unstable/drivers/gpu/nova-core/nova_core.rs"
         },
         {
             "cfg": [
@@ -77238,7 +77223,6 @@
                 "CONFIG_SECURITY_SAFESETID=\"y\"",
                 "CONFIG_ZSMALLOC",
                 "CONFIG_ZSMALLOC=\"y\"",
-                "CONFIG_NVIDIA_OPEN_GPU_KERNEL_PATH=\"/home/joelaf/repo/open-gpu-kernel-modules/\"",
                 "CONFIG_CRYPTO_RNG",
                 "CONFIG_CRYPTO_RNG=\"y\"",
                 "CONFIG_MFD_WM8400",
@@ -82009,7 +81993,7 @@
             },
             "is_proc_macro": false,
             "is_workspace_member": true,
-            "root_module": "/home/joelaf/repo/linux-nova-seq-rebase/drivers/gpu/drm/drm_panic_qr.rs"
+            "root_module": "/home/joelaf/repo/linux-nova-core-unstable/drivers/gpu/drm/drm_panic_qr.rs"
         },
         {
             "cfg": [
@@ -82349,7 +82333,6 @@
                 "CONFIG_SECURITY_SAFESETID=\"y\"",
                 "CONFIG_ZSMALLOC",
                 "CONFIG_ZSMALLOC=\"y\"",
-                "CONFIG_NVIDIA_OPEN_GPU_KERNEL_PATH=\"/home/joelaf/repo/open-gpu-kernel-modules/\"",
                 "CONFIG_CRYPTO_RNG",
                 "CONFIG_CRYPTO_RNG=\"y\"",
                 "CONFIG_MFD_WM8400",
@@ -87120,7 +87103,7 @@
             },
             "is_proc_macro": false,
             "is_workspace_member": true,
-            "root_module": "/home/joelaf/repo/linux-nova-seq-rebase/drivers/gpu/drm/nova/nova.rs"
+            "root_module": "/home/joelaf/repo/linux-nova-core-unstable/drivers/gpu/drm/nova/nova.rs"
         },
         {
             "cfg": [
@@ -87460,7 +87443,6 @@
                 "CONFIG_SECURITY_SAFESETID=\"y\"",
                 "CONFIG_ZSMALLOC",
                 "CONFIG_ZSMALLOC=\"y\"",
-                "CONFIG_NVIDIA_OPEN_GPU_KERNEL_PATH=\"/home/joelaf/repo/open-gpu-kernel-modules/\"",
                 "CONFIG_CRYPTO_RNG",
                 "CONFIG_CRYPTO_RNG=\"y\"",
                 "CONFIG_MFD_WM8400",
@@ -92231,7 +92213,7 @@
             },
             "is_proc_macro": false,
             "is_workspace_member": true,
-            "root_module": "/home/joelaf/repo/linux-nova-seq-rebase/drivers/cpufreq/rcpufreq_dt.rs"
+            "root_module": "/home/joelaf/repo/linux-nova-core-unstable/drivers/cpufreq/rcpufreq_dt.rs"
         },
         {
             "cfg": [
@@ -92571,7 +92553,6 @@
                 "CONFIG_SECURITY_SAFESETID=\"y\"",
                 "CONFIG_ZSMALLOC",
                 "CONFIG_ZSMALLOC=\"y\"",
-                "CONFIG_NVIDIA_OPEN_GPU_KERNEL_PATH=\"/home/joelaf/repo/open-gpu-kernel-modules/\"",
                 "CONFIG_CRYPTO_RNG",
                 "CONFIG_CRYPTO_RNG=\"y\"",
                 "CONFIG_MFD_WM8400",
@@ -97342,7 +97323,7 @@
             },
             "is_proc_macro": false,
             "is_workspace_member": true,
-            "root_module": "/home/joelaf/repo/linux-nova-seq-rebase/drivers/block/rnull.rs"
+            "root_module": "/home/joelaf/repo/linux-nova-core-unstable/drivers/block/rnull.rs"
         }
     ],
     "sysroot": "/home/joelaf/.rustup/toolchains/1.83.0-x86_64-unknown-linux-gnu"
