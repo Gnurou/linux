@@ -282,12 +282,11 @@ pub(crate) struct GspCmdq {
     seq: u32,
     gsp_mem: CoherentAllocation<GspMem>,
     nr_ptes: u32,
-    libos_dma_handle: u64,
 }
 
 impl GspCmdq {
     // This is equivalent to gsp_shared_init()
-    fn new(dev: &device::Device<device::Bound>, libos_dma_handle: u64) -> Result<GspCmdq> {
+    fn new(dev: &device::Device<device::Bound>, _libos_dma_handle: u64) -> Result<GspCmdq> {
         let mut gsp_mem =
             CoherentAllocation::<GspMem>::alloc_coherent(dev, 1, GFP_KERNEL | __GFP_ZERO)?;
 
@@ -317,7 +316,6 @@ impl GspCmdq {
             seq: 0,
             gsp_mem,
             nr_ptes: nr_ptes as u32,
-            libos_dma_handle,
         })
     }
 
