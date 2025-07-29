@@ -447,7 +447,7 @@ impl Gpu {
         let libos_dma_handle = libos.libos_dma_handle();
 
         // Create and run the GSP sequencer
-        match gsp::sequencer::GspSequencer::new(
+        gsp::sequencer::GspSequencer::run(
             &mut libos.cmdq,
             &fw,
             libos_dma_handle,
@@ -456,18 +456,7 @@ impl Gpu {
             pdev.as_ref(),
             &bar,
             Delta::from_secs(10),
-        ) {
-            Ok(sequencer) => {
-                if let Err(e) = sequencer.run() {
-                    pr_err!("Error running CPU sequencer: {:?}\n", e);
-                    return Err(e);
-                }
-            }
-            Err(e) => {
-                pr_err!("Error creating CPU sequencer: {:?}\n", e);
-                return Err(e);
-            }
-        }
+        )?;
 
         libos
             .cmdq

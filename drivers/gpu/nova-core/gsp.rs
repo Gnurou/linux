@@ -98,6 +98,27 @@ pub(crate) struct FbRegion {
     pub size: u64,
 }
 
+pub(crate) trait GspMessage: Sized {
+    const FUNCTION: u32;
+}
+
+impl GspMessage for fw::rpc_run_cpu_sequencer_v17_00 {
+    const FUNCTION: u32 = fw::NV_VGPU_MSG_EVENT_GSP_RUN_CPU_SEQUENCER;
+}
+
+pub(crate) struct GspSequencerInfo<'a> {
+    info: &'a fw::rpc_run_cpu_sequencer_v17_00,
+    cmd_data: KVec<u8>,
+}
+
+// impl GspMessageElement for GspSequencerInfo {
+//     fn new_from_sbuf(sbuf: &SBuffer<'_>) -> Result<Self> {
+//         let info = fw::rpc_run_cpu_sequencer_v17_00::new_from_sbuf(sbuf)?;
+//         let cmd_data = sbuf.read_kvec(size_of::<fw::rpc_run_cpu_sequencer_v17_00>())?;
+//         Ok(GspSequencerInfo { info, cmd_data })
+//     }
+// }
+
 pub(crate) struct GspStaticConfigInfo {
     pub gpu_name: [u8; 40],
     pub h_internal_client: u32,
@@ -282,6 +303,55 @@ pub(crate) struct GspCmdq {
     seq: u32,
     gsp_mem: CoherentAllocation<GspMem>,
     nr_ptes: u32,
+}
+
+struct GspQueueMessage<'a> {
+    cmdq: &'a mut GspCmdq,
+    slice_1: &'a [u8],
+    slice_2: Option<&'a [u8]>,
+    header: &'a GspRpcHeader,
+}
+
+impl<'a> GspQueueMessage<'a> {
+    fn try_as<M: GspMessage>(
+        &'a self,
+    ) -> Result<(&'a M, Option<SBuffer<core::array::IntoIter<&[u8], 2>>>)> {
+        let header_size = size_of::<GspMsgHeader>() + size_of::<GspRpcHeader>();
+
+        if self.header.function != M::FUNCTION {
+            return Err(ERANGE);
+        }
+
+        let msg = unsafe { &*(self.slice_1.as_ptr() as *const M) };
+        let data = &self.slice_1[size_of::<M>()..];
+        let data_size = self.header.length as usize - size_of::<GspRpcHeader>() - size_of::<M>();
+
+        // let (slice_1, slice_2) = if data_size > 0 {
+        //     (Some(data), self.slice_2)
+        // } else {
+        //     (None, None)
+        // };
+
+        // Ok((msg, slice_1, slice_2))
+
+        let sbuf = if data_size > 0 {
+            if let Some(slice) = self.slice_2 {
+                Some(SBuffer::new_reader([data, slice]))
+            } else {
+                Some(SBuffer::new_reader([data, &[]]))
+            }
+        } else {
+            None
+        };
+
+        Ok((msg, sbuf))
+    }
+
+    fn ack(self) -> Result {
+        self.cmdq.ack_msg(self.header.length)?;
+
+        Ok(())
+    }
 }
 
 impl GspCmdq {
@@ -495,11 +565,10 @@ impl GspCmdq {
         Ok(())
     }
 
-    pub(crate) fn receive<A: GspMessageElement>(
-        self: &mut Self,
+    fn receive_msg<'a>(
+        self: &'a mut Self,
         dev: &device::Device<device::Bound>,
-        function: u32,
-    ) -> Result<A> {
+    ) -> Result<GspQueueMessage<'a>> {
         const HEADER_SIZE: u32 = (size_of::<GspMsgHeader>() + size_of::<GspRpcHeader>()) as u32;
 
         // Used pages contains the total number of pages available to consume
@@ -521,7 +590,9 @@ impl GspCmdq {
             core::ptr::addr_of_mut!((*self.gsp_mem.start_ptr_mut()).gspq.msgq.data[rptr as usize])
         };
         let msg_slice =
-            unsafe { core::slice::from_raw_parts_mut(ptr as *mut u8, remaining as usize) };
+            unsafe { core::slice::from_raw_parts(ptr as *const u8, remaining as usize) };
+        let rpc_ptr =
+            unsafe { &*((ptr as *const u8).add(size_of::<GspMsgHeader>()) as *const GspRpcHeader) };
 
         // TODO: Validating the checksum will read this
         let _msg = GspMsgHeader::from_bytes(&msg_slice[0..size_of::<GspMsgHeader>()])
@@ -554,11 +625,11 @@ impl GspCmdq {
             return Err(EAGAIN);
         }
 
-        let result = if rpc.length + HEADER_SIZE < remaining {
-            let mut sbuf = SBuffer::new_reader([
-                &msg_slice[(HEADER_SIZE as usize)..(HEADER_SIZE + rpc.length) as usize]
-            ]);
-            A::new_from_sbuf(&mut sbuf)
+        let (slice_1, slice_2) = if rpc.length + HEADER_SIZE < remaining {
+            (
+                &msg_slice[(HEADER_SIZE as usize)..(HEADER_SIZE + rpc.length) as usize],
+                None,
+            )
         } else {
             let slice_1 = &msg_slice[(HEADER_SIZE as usize)..(HEADER_SIZE + remaining) as usize];
             let ptr =
@@ -566,20 +637,23 @@ impl GspCmdq {
             let slice_2 = unsafe {
                 core::slice::from_raw_parts(ptr as *const u8, rpc.length as usize - slice_1.len())
             };
-
-            let mut sbuf = SBuffer::new_reader([slice_1, slice_2]);
-
-            A::new_from_sbuf(&mut sbuf)
+            (slice_1, Some(slice_2))
         };
 
-        let result = if rpc.function == function {
-            result
-        } else {
-            Err(ERANGE)
+        let gspq_msg = GspQueueMessage {
+            cmdq: self,
+            slice_1,
+            slice_2,
+            header: rpc_ptr,
         };
 
+        Ok(gspq_msg)
+    }
+
+    fn ack_msg(self: &mut Self, length: u32) -> Result {
+        const HEADER_SIZE: u32 = (size_of::<GspMsgHeader>() + size_of::<GspRpcHeader>()) as u32;
         let mut rptr = self.cpu_rptr()?;
-        rptr = rptr + (HEADER_SIZE + rpc_length).div_ceil(GSP_PAGE_SIZE as u32);
+        rptr = rptr + (HEADER_SIZE + length).div_ceil(GSP_PAGE_SIZE as u32);
         rptr %= MSGQ_NUM_PAGES as u32;
 
         // TODO: Figure out Rust barriers
@@ -588,39 +662,7 @@ impl GspCmdq {
             dma_write!(self.gsp_mem[0].cpuq.rx.read_ptr = rptr)?;
         };
 
-        result
-    }
-
-    /// Same as the `receive_wait()` method but will consume and ingnore
-    /// unexpected messages. Ie. messages with a different function to the passed
-    /// `function` parameter.
-    fn receive_wait_ignore<R: GspMessageElement>(
-        &mut self,
-        dev: &device::Device<device::Bound>,
-        timeout: Delta,
-        function: u32,
-    ) -> Result<R> {
-        wait_on_result(timeout, || match self.receive::<R>(dev, function) {
-            Ok(x) => Some(Ok(x)),
-            Err(EAGAIN) => None,
-            Err(ERANGE) => None,
-            Err(e) => Some(Err(e)),
-        })
-    }
-
-    /// Wait to receive a message matching `function`. If a different message is
-    /// in the queue this will return `Err(ERANGE)`.
-    fn receive_wait<R: GspMessageElement>(
-        &mut self,
-        dev: &device::Device<device::Bound>,
-        timeout: Delta,
-        function: u32,
-    ) -> Result<R> {
-        wait_on_result(timeout, || match self.receive::<R>(dev, function) {
-            Ok(x) => Some(Ok(x)),
-            Err(EAGAIN) => None,
-            Err(e) => Some(Err(e)),
-        })
+        Ok(())
     }
 
     pub(crate) fn gsp_init_done(
@@ -628,8 +670,28 @@ impl GspCmdq {
         dev: &device::Device<device::Bound>,
         timeout: Delta,
     ) -> Result {
-        self.receive_wait_ignore::<EmptyCmd>(dev, timeout, fw::NV_VGPU_MSG_EVENT_GSP_INIT_DONE)
-            .map(|_| ())
+        loop {
+            let msg = loop {
+                match self.receive_msg(dev) {
+                    Ok(x) => break Ok(x),
+                    Err(EAGAIN) => continue,
+                    Err(x) => break Err(x),
+                };
+            }?;
+
+            let init_done = match msg.try_as::<GspInitDone>() {
+                Ok(_) => Ok(()),
+                Err(e) => Err(e),
+            };
+
+            msg.ack()?;
+
+            match init_done {
+                Ok(_) => break Ok(()),
+                Err(ERANGE) => continue,
+                Err(e) => break Err(e),
+            };
+        }
     }
 
     pub(crate) fn get_gsp_info(
@@ -644,12 +706,102 @@ impl GspCmdq {
                 size: size_of::<fw::GspStaticConfigInfo_t>(),
             }),
         )?;
-        self.receive_wait::<GspStaticConfigInfo>(
-            dev,
-            Delta::from_secs(5),
-            fw::NV_VGPU_MSG_FUNCTION_GET_GSP_STATIC_INFO,
-        )
+
+        // let x = wait_on_result(Delta::from_secs(5), &mut || match self.receive_msg(dev) {
+        //     Ok(x) => Some(Ok(&x)),
+        //     Err(EAGAIN) => None,
+        //     Err(e) => Some(Err(e)),
+        // });
+
+        let msg = loop {
+            match self.receive_msg(dev) {
+                Ok(x) => break Ok(x),
+                Err(EAGAIN) => continue,
+                Err(x) => break Err(x),
+            };
+        }?;
+
+        let info = match msg.try_as::<fw::GspStaticConfigInfo_t>() {
+            Ok((x, _)) => Ok(x),
+            Err(e) => Err(e),
+        }?;
+
+        let gpu_name_str = info
+            .gpuNameString
+            .get(
+                0..=info
+                    .gpuNameString
+                    .iter()
+                    .position(|&b| b == 0)
+                    .unwrap_or(info.gpuNameString.len() - 1),
+            )
+            .and_then(|bytes| CStr::from_bytes_with_nul(bytes).ok())
+            .and_then(|cstr| cstr.to_str().ok())
+            .unwrap_or("invalid utf8");
+
+        let mut gpu_name = [0u8; 40];
+        let bytes = gpu_name_str.as_bytes();
+        let copy_len = core::cmp::min(bytes.len(), gpu_name.len());
+        gpu_name[..copy_len].copy_from_slice(&bytes[..copy_len]);
+        gpu_name[copy_len] = b'\0';
+
+        // Parse FB regions
+        let mut fb_regions = KVec::new();
+        let fb_info = &info.fbRegionInfoParams;
+
+        // TODO: Need to use dev_dbg
+        pr_info!("nova: Found {} FB regions\n", fb_info.numFBRegions);
+
+        for i in 0..fb_info.numFBRegions as usize {
+            if i >= 16 {
+                break;
+            } // Max regions in the array
+            let region = &fb_info.fbRegion[i];
+
+            // TODO: Need to use dev_dbg
+            pr_info!("nova: FB region {}: base={:#x} limit={:#x} reserved={:#x} compressed={} iso={} protected={}\n",
+                i, region.base, region.limit, region.reserved,
+                region.supportCompressed, region.supportISO, region.bProtected);
+
+            // Only add usable regions (not reserved, not protected, supports compression and ISO)
+            if region.reserved == 0 && region.bProtected == 0 {
+                if region.supportCompressed != 0 && region.supportISO != 0 {
+                    let size = (region.limit + 1) - region.base;
+                    fb_regions.push(
+                        FbRegion {
+                            addr: region.base,
+                            size,
+                        },
+                        GFP_KERNEL,
+                    )?;
+                }
+            }
+        }
+
+        let fb_region_count = fb_regions.len();
+        let config_info = GspStaticConfigInfo {
+            gpu_name,
+            h_internal_client: info.hInternalClient,
+            h_internal_device: info.hInternalDevice,
+            h_internal_subdevice: info.hInternalSubdevice,
+            fb_regions,
+            fb_region_count,
+            bar1_pdb: info.bar1PdeBase,
+            bar2_pdb: info.bar2PdeBase,
+        };
+
+        msg.ack()?;
+        Ok(config_info)
     }
+}
+
+struct GspInitDone {}
+impl GspMessage for GspInitDone {
+    const FUNCTION: u32 = fw::NV_VGPU_MSG_EVENT_GSP_INIT_DONE;
+}
+
+impl GspMessage for fw::GspStaticConfigInfo_t {
+    const FUNCTION: u32 = fw::NV_VGPU_MSG_FUNCTION_GET_GSP_STATIC_INFO;
 }
 
 struct EmptyCmd {

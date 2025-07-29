@@ -24,18 +24,18 @@ unsafe impl FromBytesSized for fw::rpc_run_cpu_sequencer_v17_00 {}
 
 const CMD_SIZE: usize = size_of::<fw::GSP_SEQUENCER_BUFFER_CMD>();
 
-pub(crate) struct GspSequencerInfo {
-    pub info: fw::rpc_run_cpu_sequencer_v17_00,
+pub(crate) struct GspSequencerInfo<'a> {
+    pub info: &'a fw::rpc_run_cpu_sequencer_v17_00,
     pub cmd_data: KVec<u8>,
 }
 
-impl GspMessageElement for GspSequencerInfo {
-    fn new_from_sbuf<'a, I: Iterator<Item = &'a [u8]>>(sbuf: &mut SBuffer<I>) -> Result<Self> {
-        let info = fw::rpc_run_cpu_sequencer_v17_00::new_from_sbuf(sbuf)?;
-        let cmd_data = sbuf.read_into_kvec(GFP_KERNEL)?;
-        Ok(GspSequencerInfo { info, cmd_data })
-    }
-}
+// impl GspMessageElement for GspSequencerInfo {
+//     fn new_from_sbuf<'a, I: Iterator<Item = &'a [u8]>>(sbuf: &mut SBuffer<I>) -> Result<Self> {
+//         let info = fw::rpc_run_cpu_sequencer_v17_00::new_from_sbuf(sbuf)?;
+//         let cmd_data = sbuf.read_into_kvec(GFP_KERNEL)?;
+//         Ok(GspSequencerInfo { info, cmd_data })
+//     }
+// }
 
 /// GSP Sequencer Command types with payload data
 /// Commands have an opcode and a opcode-dependent struct.
@@ -118,7 +118,7 @@ impl GspSeqCmd {
 }
 
 pub(crate) struct GspSequencer<'a> {
-    pub seq_info: GspSequencerInfo,
+    pub seq_info: GspSequencerInfo<'a>,
     pub bar: &'a Bar0,
     pub sec2_falcon: &'a Falcon<Sec2>,
     pub gsp_falcon: &'a Falcon<Gsp>,
@@ -383,7 +383,7 @@ impl<'a, 'b> IntoIterator for &'b GspSequencer<'a> {
 }
 
 impl<'a> GspSequencer<'a> {
-    pub(crate) fn new(
+    pub(crate) fn run(
         cmdq: &mut crate::gsp::GspCmdq,
         fw: &'a Firmware,
         libos_dma_handle: u64,
@@ -392,17 +392,23 @@ impl<'a> GspSequencer<'a> {
         dev: &'a device::Device<device::Bound>,
         bar: &'a Bar0,
         timeout: Delta,
-    ) -> Result<Self> {
-        // Receive the sequencer info from the GSP command queue
-        let seq_info = crate::util::wait_on_result(timeout, || {
-            match cmdq.receive(dev, fw::NV_VGPU_MSG_EVENT_GSP_RUN_CPU_SEQUENCER) {
-                Ok(seq_info) => Some(Ok(seq_info)),
-                Err(EAGAIN) => None,
-                Err(e) => Some(Err(e)),
-            }
-        })?;
+    ) -> Result {
+        let msg = loop {
+            match cmdq.receive_msg(dev) {
+                Ok(x) => break Ok(x),
+                Err(EAGAIN) => continue,
+                Err(x) => break Err(x),
+            };
+        }?;
 
-        Ok(GspSequencer {
+        let (info, mut sbuf) = msg.try_as::<fw::rpc_run_cpu_sequencer_v17_00>()?;
+        let cmd_data = match sbuf {
+            Some(ref mut sbuf) => sbuf.read_into_kvec(GFP_KERNEL),
+            _ => Err(EINVAL),
+        }?;
+        let seq_info = GspSequencerInfo { info, cmd_data };
+
+        let sequencer = GspSequencer {
             seq_info,
             bar,
             sec2_falcon,
@@ -410,27 +416,28 @@ impl<'a> GspSequencer<'a> {
             libos_dma_handle,
             fw,
             dev,
-        })
-    }
+        };
 
-    pub(crate) fn run(&self) -> Result {
-        dev_dbg!(self.dev, "Running CPU Sequencer commands\n");
+        dev_dbg!(dev, "Running CPU Sequencer commands\n");
 
-        for cmd_result in self {
+        for cmd_result in &sequencer {
             match cmd_result {
-                Ok(cmd) => cmd.run(self)?,
+                Ok(cmd) => cmd.run(&sequencer)?,
                 Err(e) => {
                     dev_err!(
-                        self.dev,
+                        dev,
                         "Error running command at index {}\n",
-                        self.seq_info.info.cmdIndex
+                        sequencer.seq_info.info.cmdIndex
                     );
                     return Err(e);
                 }
             }
         }
 
-        dev_dbg!(self.dev, "CPU Sequencer commands completed successfully\n");
+        dev_dbg!(dev, "CPU Sequencer commands completed successfully\n");
+
+        drop(sbuf);
+        msg.ack()?;
 
         Ok(())
     }
