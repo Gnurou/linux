@@ -630,7 +630,7 @@ struct RegistryTable {
 }
 
 impl GspCommandElement for RegistryTable {
-    fn copy_to_sbuf(&self, sbuf: &mut SBufferIteratorMut<'_, '_>) -> Result {
+    fn copy_to_sbuf<'a, I: Iterator<Item = &'a mut [u8]>>(&self, sbuf: &mut SBuffer<I>) -> Result {
         let total_size = self.size();
         let align = core::mem::align_of::<fw::PACKED_REGISTRY_TABLE>();
         let layout = Layout::from_size_align(total_size, align)
@@ -676,7 +676,7 @@ impl GspCommandElement for RegistryTable {
             core::slice::from_raw_parts(ptr as *const u8, layout.size())
         };
 
-        sbuf.write_slice(cmd_slice)?;
+        sbuf.write_all(cmd_slice)?;
 
         // Free the allocated memory by converting slice back to pointer.
         unsafe {
