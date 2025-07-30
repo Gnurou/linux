@@ -27,7 +27,7 @@ pub(crate) trait RmHeader: GspMessageElement {
 /// Generic response wrapper that holds both header and data. Only the header
 /// differs between different RM API operations (e.g. control vs alloc).
 /// TODO: Shall we combine this and RmMessage?
-pub(crate) struct RmGspResponse<H: RmHeader> {
+struct RmGspResponse<H: RmHeader> {
     pub header: H,
     pub data: KVec<u8>,
 }
