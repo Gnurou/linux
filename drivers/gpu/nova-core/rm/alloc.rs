@@ -2,7 +2,7 @@
 //
 // RM alloc/free operation implementation
 
-use super::common::{RmCommand, RmHeader, RmMessage};
+use super::{RmCommand, RmHeader, RmMessage};
 use crate::gsp::{GspCommand, GspCommandElement, GspMessageElement};
 use crate::nvfw::r570_144 as fw;
 use crate::sbuffer::SBuffer;

@@ -3,7 +3,7 @@
 // RM Control implementation for nova-core
 // RM control commands are used to query and configure various GPU resources.
 
-use super::common::{RmCommand, RmHeader, RmMessage, RmResponseElement};
+use super::{RmCommand, RmHeader, RmMessage, RmResponseElement};
 use crate::driver::Bar0;
 use crate::gsp::{GspCmdq, GspCommand, GspCommandElement, GspMessageElement, GspStaticConfigInfo};
 use crate::nvfw::r570_144 as fw;
