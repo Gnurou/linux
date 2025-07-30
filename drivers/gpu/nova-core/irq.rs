@@ -2,7 +2,6 @@
 
 use crate::gsp::{GspCmdq, GspStaticConfigInfo};
 use crate::nvfw::r570_144 as fw;
-use crate::rm::common::RmApi;
 use crate::rm::control::RmControl;
 use crate::rm::RmResponseElement as RmControlMessageElement;
 use kernel::alloc::KVec;
@@ -79,13 +78,6 @@ pub(crate) fn dump_table<'a>(
     gsp_info: &'a GspStaticConfigInfo,
     dev: &'a device::Device<device::Bound>,
 ) -> Result {
-    /*
-     * Temporary, till the core::mem::forget hack in gpu.rs is fixed.
-     */
-    let cmdq_ref: &'a mut GspCmdq = unsafe { core::mem::transmute(cmdq) };
-
-    let mut rm_control = RmApi::new(cmdq_ref, bar, gsp_info, dev);
-
     let params = IrqTableParams {
         table_len: 0,
         table: [IrqTableEntry {
@@ -100,7 +92,7 @@ pub(crate) fn dump_table<'a>(
         }; fw::NV2080_INTR_CATEGORY_ENUM_COUNT as usize],
     };
 
-    let table: IrqTable = rm_control.send_control(&params)?;
+    let table: IrqTable = cmdq.send_rm_control(dev, bar, gsp_info, &params)?;
 
     dev_info!(dev, "Interrupt table: {} entries\n", table.table_len);
     for (i, entry) in table.entries.iter().enumerate() {

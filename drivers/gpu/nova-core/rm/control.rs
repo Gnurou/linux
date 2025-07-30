@@ -3,12 +3,13 @@
 // RM Control implementation for nova-core
 // RM control commands are used to query and configure various GPU resources.
 
-use super::common::{RmApi, RmCommand, RmHeader, RmMessage, RmResponseElement};
-use crate::gsp::{GspCommand, GspCommandElement, GspMessageElement, GspStaticConfigInfo};
+use super::common::{RmCommand, RmHeader, RmMessage, RmResponseElement};
+use crate::driver::Bar0;
+use crate::gsp::{GspCmdq, GspCommand, GspCommandElement, GspMessageElement, GspStaticConfigInfo};
 use crate::nvfw::r570_144 as fw;
 use crate::sbuffer::SBuffer;
-use kernel::prelude::*;
 use kernel::transmute::AsBytes;
+use kernel::{device, prelude::*};
 
 /// Wrapper for RM Control commands
 pub(crate) struct RmControlCmd<'a>(pub(crate) RmMessage<'a, RmControlHeader>);
@@ -70,13 +71,22 @@ impl RmControlHeader {
 }
 
 /// Extensions specific to RM Control operations
-impl<'a> RmApi<'a> {
-    /// Send an RM control command with automatic object handle setup
-    pub(crate) fn send_control<C: RmControl>(&mut self, params: &'a C) -> Result<C::Response> {
-        self.send(&RmControlCmd::new(
-            RmControlHeader::new(self.gsp_info(), params),
-            params.as_bytes(),
-        ))
+impl GspCmdq {
+    /// Send an RM command and get its response.
+    pub(crate) fn send_rm_control<C: RmControl>(
+        &mut self,
+        // TODO: we should store an ARef of this in GspCmdq and remove this parameter. This is
+        // possible as the device does not need to be bound to use `dev_*`.
+        dev: &device::Device,
+        bar: &Bar0,
+        gsp_info: &GspStaticConfigInfo,
+        params: &C,
+    ) -> Result<C::Response> {
+        self.send_rm_command(
+            dev,
+            bar,
+            &RmControlCmd::new(RmControlHeader::new(gsp_info, params), params.as_bytes()),
+        )
     }
 }
 

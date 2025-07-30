@@ -3,7 +3,8 @@
 // Common RM API implementation for nova-core
 // Provides generic infrastructure for RM control and RM alloc operations.
 
-use crate::gsp::{GspCmdq, GspCommand, GspCommandElement, GspMessageElement, GspStaticConfigInfo};
+use crate::driver::Bar0;
+use crate::gsp::{GspCmdq, GspCommand, GspCommandElement, GspMessageElement};
 use crate::sbuffer::SBuffer;
 use crate::util::wait_on_result;
 use kernel::device;
@@ -77,48 +78,25 @@ pub(crate) trait RmResponseElement: Sized {
     fn from_bytes(data: &[u8]) -> Result<Self>;
 }
 
-/// Generic RM API struct for all RM API operations
-/// An RmApi instance is created for control and alloc operations.
-pub(crate) struct RmApi<'a> {
-    cmdq: &'a mut GspCmdq,
-    bar: &'a crate::driver::Bar0,
-    gsp_info: &'a GspStaticConfigInfo,
-    dev: &'a device::Device<device::Bound>,
-}
-
-impl<'a> RmApi<'a> {
-    /// Create new RM API instance
-    pub(crate) fn new(
-        cmdq: &'a mut GspCmdq,
-        bar: &'a crate::driver::Bar0,
-        gsp_info: &'a GspStaticConfigInfo,
-        dev: &'a device::Device<device::Bound>,
-    ) -> Self {
-        Self {
-            cmdq,
-            bar,
-            gsp_info,
-            dev,
-        }
-    }
-
-    /// Send an RM command with optional params and get response
-    pub(crate) fn send<CMD: RmCommand<'a>, T: RmResponseElement>(
+impl GspCmdq {
+    /// Send an RM command and get its response.
+    pub(crate) fn send_rm_command<'a, CMD: RmCommand<'a>, T: RmResponseElement>(
         &mut self,
+        // TODO: we should store an ARef of this in GspCmdq and remove this parameter. This is
+        // possible as the device does not need to be bound to use `dev_*`.
+        dev: &device::Device,
+        bar: &Bar0,
         cmd: &CMD,
     ) -> Result<T> {
-        self.cmdq.send(self.bar, cmd)?;
+        self.send(bar, cmd)?;
 
-        dev_info!(self.dev, "RM API: Sent function {:#x}\n", CMD::FUNCTION,);
+        dev_info!(dev, "RM API: Sent function {:#x}\n", CMD::FUNCTION,);
 
         // Wait for response
         // TODO: Should this be implemented as a receive(), similar to GSP RPC?
         // TODO: Should this be skipped in case usecase doesn't need a response?
         let response = wait_on_result(Delta::from_secs(5), || {
-            match self
-                .cmdq
-                .receive::<RmGspResponse<CMD::Header>>(CMD::FUNCTION)
-            {
+            match self.receive::<RmGspResponse<CMD::Header>>(CMD::FUNCTION) {
                 Ok(response) => Some(Ok(response)),
                 Err(EAGAIN) => None,
                 Err(e) => Some(Err(e)),
@@ -128,7 +106,7 @@ impl<'a> RmApi<'a> {
         // Check for RM errors
         if response.header.get_status() != 0 {
             dev_err!(
-                self.dev,
+                dev,
                 "RM API: Function {:#x} failed with status {:#x}\n",
                 CMD::FUNCTION,
                 response.header.get_status()
@@ -138,10 +116,5 @@ impl<'a> RmApi<'a> {
 
         // Parse and return data of the expected type
         T::from_bytes(&response.data)
-    }
-
-    /// Get the internal subdevice handle (useful for control operations)
-    pub(crate) fn gsp_info(&'a self) -> &'a GspStaticConfigInfo {
-        self.gsp_info
     }
 }
