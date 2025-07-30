@@ -5,24 +5,14 @@
 
 use super::{RmCommand, RmHeader, RmMessage, RmResponseElement};
 use crate::driver::Bar0;
-use crate::gsp::{GspCmdq, GspCommand, GspCommandElement, GspMessageElement, GspStaticConfigInfo};
+use crate::gsp::{GspCmdq, GspCommand, GspMessageElement, GspStaticConfigInfo};
 use crate::nvfw::r570_144 as fw;
 use crate::sbuffer::SBuffer;
 use kernel::transmute::AsBytes;
 use kernel::{device, prelude::*};
 
 /// Wrapper for RM Control commands
-pub(crate) struct RmControlCmd<'a>(pub(crate) RmMessage<'a, RmControlHeader>);
-
-impl<'a> GspCommandElement for RmControlCmd<'a> {
-    fn copy_to_sbuf<'b, I: Iterator<Item = &'b mut [u8]>>(&self, sbuf: &mut SBuffer<I>) -> Result {
-        self.0.copy_to_sbuf(sbuf)
-    }
-
-    fn size(&self) -> usize {
-        self.0.size()
-    }
-}
+pub(crate) type RmControlCmd<'a> = RmMessage<'a, RmControlHeader>;
 
 impl<'a> GspCommand for RmControlCmd<'a> {
     const FUNCTION: u32 = fw::NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL;
@@ -34,10 +24,10 @@ impl<'a> RmCommand<'a> for RmControlCmd<'a> {
 
 impl<'a> RmControlCmd<'a> {
     fn new<C: RmControl>(gsp_info: &GspStaticConfigInfo, params: &'a C) -> Self {
-        Self(RmMessage {
+        Self {
             header: RmControlHeader::new(gsp_info, params),
             params: params.as_bytes(),
-        })
+        }
     }
 }
 

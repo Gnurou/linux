@@ -3,24 +3,14 @@
 // RM alloc/free operation implementation
 
 use super::{RmCommand, RmHeader, RmMessage};
-use crate::gsp::{GspCommand, GspCommandElement, GspMessageElement};
+use crate::gsp::{GspCommand, GspMessageElement};
 use crate::nvfw::r570_144 as fw;
 use crate::sbuffer::SBuffer;
 use kernel::prelude::*;
 
 /// Wrapper for RM Alloc commands
 #[allow(dead_code)]
-pub(crate) struct RmAllocCmd<'a>(pub(crate) RmMessage<'a, RmAllocHeader>);
-
-impl<'a> GspCommandElement for RmAllocCmd<'a> {
-    fn copy_to_sbuf<'b, I: Iterator<Item = &'b mut [u8]>>(&self, sbuf: &mut SBuffer<I>) -> Result {
-        self.0.copy_to_sbuf(sbuf)
-    }
-
-    fn size(&self) -> usize {
-        self.0.size()
-    }
-}
+pub(crate) type RmAllocCmd<'a> = RmMessage<'a, RmAllocHeader>;
 
 impl<'a> GspCommand for RmAllocCmd<'a> {
     const FUNCTION: u32 = fw::NV_VGPU_MSG_FUNCTION_GSP_RM_ALLOC;
