@@ -41,10 +41,6 @@ impl<H: RmHeader> RmCommand<H> for AllocCommandWrapper {
     {
         RmAllocCmd(msg)
     }
-
-    fn function() -> u32 {
-        fw::NV_VGPU_MSG_FUNCTION_GSP_RM_ALLOC
-    }
 }
 
 /// RM Alloc header structure (32 bytes)

@@ -41,10 +41,6 @@ impl<H: RmHeader> RmCommand<H> for ControlCommandWrapper {
     {
         RmControlCmd(msg)
     }
-
-    fn function() -> u32 {
-        fw::NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL
-    }
 }
 
 /// RM Control header structure

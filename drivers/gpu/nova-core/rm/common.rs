@@ -88,7 +88,6 @@ pub(crate) trait RmCommand<H: RmHeader> {
     fn from_message<'a>(msg: RmMessage<'a, H>) -> Self::Command<'a>
     where
         H: 'a;
-    fn function() -> u32;
 }
 
 /// Trait for input parameters
@@ -154,7 +153,7 @@ impl<'a> RmApi<'a> {
         dev_info!(
             self.dev,
             "RM API: Sent function {:#x} with {} bytes params\n",
-            CMD::function(),
+            CMD::Command::FUNCTION,
             params_size
         );
 
@@ -162,7 +161,10 @@ impl<'a> RmApi<'a> {
         // TODO: Should this be implemented as a receive(), similar to GSP RPC?
         // TODO: Should this be skipped in case usecase doesn't need a response?
         let response = wait_on_result(Delta::from_secs(5), || {
-            match self.cmdq.receive::<RmGspResponse<HDR>>(CMD::function()) {
+            match self
+                .cmdq
+                .receive::<RmGspResponse<HDR>>(CMD::Command::FUNCTION)
+            {
                 Ok(response) => Some(Ok(response)),
                 Err(EAGAIN) => None,
                 Err(e) => Some(Err(e)),
@@ -174,7 +176,7 @@ impl<'a> RmApi<'a> {
             dev_err!(
                 self.dev,
                 "RM API: Function {:#x} failed with status {:#x}\n",
-                CMD::function(),
+                CMD::Command::FUNCTION,
                 response.header.get_status()
             );
             return Err(EIO);
