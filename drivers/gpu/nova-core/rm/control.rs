@@ -73,8 +73,10 @@ impl RmControlHeader {
 impl<'a> RmApi<'a> {
     /// Send an RM control command with automatic object handle setup
     pub(crate) fn send_control<C: RmControl>(&mut self, params: &'a C) -> Result<C::Response> {
-        let header = RmControlHeader::new(self.gsp_info(), params);
-        self.send::<RmControlCmd<'a>, _>(header, params.as_bytes())
+        self.send(&RmControlCmd::new(
+            RmControlHeader::new(self.gsp_info(), params),
+            params.as_bytes(),
+        ))
     }
 }
 

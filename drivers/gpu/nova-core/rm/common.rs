@@ -105,19 +105,11 @@ impl<'a> RmApi<'a> {
     /// Send an RM command with optional params and get response
     pub(crate) fn send<CMD: RmCommand<'a>, T: RmResponseElement>(
         &mut self,
-        header: CMD::Header,
-        params: &'a [u8],
+        cmd: &CMD,
     ) -> Result<T> {
-        // Create and send the command
-        let cmd = CMD::new(header, params);
-        self.cmdq.send(self.bar, &cmd)?;
+        self.cmdq.send(self.bar, cmd)?;
 
-        dev_info!(
-            self.dev,
-            "RM API: Sent function {:#x} with {} bytes params\n",
-            CMD::FUNCTION,
-            params.len()
-        );
+        dev_info!(self.dev, "RM API: Sent function {:#x}\n", CMD::FUNCTION,);
 
         // Wait for response
         // TODO: Should this be implemented as a receive(), similar to GSP RPC?
