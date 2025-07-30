@@ -26,14 +26,9 @@ impl<'a> GspCommand for RmControlCmd<'a> {
     const FUNCTION: u32 = fw::NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL;
 }
 
-/// Control command wrapper implementation
-pub(crate) struct ControlCommandWrapper;
-
-impl RmCommand<RmControlHeader> for ControlCommandWrapper {
-    type Command<'a> = RmControlCmd<'a>;
-
-    fn from_message<'a>(msg: RmMessage<'a, RmControlHeader>) -> Self::Command<'a> {
-        RmControlCmd(msg)
+impl<'a> RmCommand<'a, RmControlHeader> for RmControlCmd<'a> {
+    fn new(header: RmControlHeader, params: Option<&'a [u8]>) -> Self {
+        Self(RmMessage { header, params })
     }
 }
 
@@ -69,10 +64,10 @@ impl<'a> RmApi<'a> {
     pub(crate) fn send_control<P: RmParams, T: RmResponseElement>(
         &mut self,
         cmd: u32,
-        params: Option<&P>,
+        params: Option<&'a P>,
     ) -> Result<T> {
         let header = RmControlHeader::new(self.subdevice_handle(), cmd);
-        self.send::<ControlCommandWrapper, _, _, _>(header, params)
+        self.send::<RmControlCmd<'a>, _, _, _>(header, params)
     }
 }
 

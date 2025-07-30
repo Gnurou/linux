@@ -81,11 +81,8 @@ impl<'a, H: RmHeader> GspCommandElement for RmMessage<'a, H> {
 }
 
 /// Trait for wrapping RmMessage into specific command types
-pub(crate) trait RmCommand<H: RmHeader> {
-    type Command<'a>: GspCommand + GspCommandElement
-    where
-        H: 'a;
-    fn from_message<'a>(msg: RmMessage<'a, H>) -> Self::Command<'a>;
+pub(crate) trait RmCommand<'a, H: RmHeader>: GspCommand {
+    fn new(header: H, params: Option<&'a [u8]>) -> Self;
 }
 
 /// Trait for input parameters
@@ -125,10 +122,15 @@ impl<'a> RmApi<'a> {
     }
 
     /// Send an RM command with optional params and get response
-    pub(crate) fn send<CMD: RmCommand<HDR>, HDR: RmHeader, P: RmParams, T: RmResponseElement>(
+    pub(crate) fn send<
+        CMD: RmCommand<'a, HDR>,
+        HDR: RmHeader,
+        P: RmParams,
+        T: RmResponseElement,
+    >(
         &mut self,
         mut header: HDR,
-        params: Option<&P>,
+        params: Option<&'a P>,
     ) -> Result<T> {
         let params_size = params.map_or(0, |p| p.to_bytes().len());
 
@@ -138,20 +140,14 @@ impl<'a> RmApi<'a> {
         header.set_params_size(params_size as u32);
         header.set_flags(0);
 
-        // Create message wrapper
-        let msg = RmMessage {
-            header,
-            params: params.map(|p| p.to_bytes()),
-        };
-
         // Create and send the command
-        let cmd = CMD::from_message(msg);
+        let cmd = CMD::new(header, params.map(|p| p.to_bytes()));
         self.cmdq.send(self.bar, &cmd)?;
 
         dev_info!(
             self.dev,
             "RM API: Sent function {:#x} with {} bytes params\n",
-            CMD::Command::FUNCTION,
+            CMD::FUNCTION,
             params_size
         );
 
@@ -159,10 +155,7 @@ impl<'a> RmApi<'a> {
         // TODO: Should this be implemented as a receive(), similar to GSP RPC?
         // TODO: Should this be skipped in case usecase doesn't need a response?
         let response = wait_on_result(Delta::from_secs(5), || {
-            match self
-                .cmdq
-                .receive::<RmGspResponse<HDR>>(CMD::Command::FUNCTION)
-            {
+            match self.cmdq.receive::<RmGspResponse<HDR>>(CMD::FUNCTION) {
                 Ok(response) => Some(Ok(response)),
                 Err(EAGAIN) => None,
                 Err(e) => Some(Err(e)),
@@ -174,7 +167,7 @@ impl<'a> RmApi<'a> {
             dev_err!(
                 self.dev,
                 "RM API: Function {:#x} failed with status {:#x}\n",
-                CMD::Command::FUNCTION,
+                CMD::FUNCTION,
                 response.header.get_status()
             );
             return Err(EIO);

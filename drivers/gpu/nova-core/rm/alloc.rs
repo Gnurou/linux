@@ -9,6 +9,7 @@ use crate::sbuffer::SBuffer;
 use kernel::prelude::*;
 
 /// Wrapper for RM Alloc commands
+#[allow(dead_code)]
 pub(crate) struct RmAllocCmd<'a>(pub(crate) RmMessage<'a, RmAllocHeader>);
 
 impl<'a> GspCommandElement for RmAllocCmd<'a> {
@@ -25,15 +26,9 @@ impl<'a> GspCommand for RmAllocCmd<'a> {
     const FUNCTION: u32 = fw::NV_VGPU_MSG_FUNCTION_GSP_RM_ALLOC;
 }
 
-/// Alloc command wrapper implementation
-#[allow(dead_code)]
-pub(crate) struct AllocCommandWrapper;
-
-impl RmCommand<RmAllocHeader> for AllocCommandWrapper {
-    type Command<'a> = RmAllocCmd<'a>;
-
-    fn from_message<'a>(msg: RmMessage<'a, RmAllocHeader>) -> Self::Command<'a> {
-        RmAllocCmd(msg)
+impl<'a> RmCommand<'a, RmAllocHeader> for RmAllocCmd<'a> {
+    fn new(header: RmAllocHeader, params: Option<&'a [u8]>) -> Self {
+        Self(RmMessage { header, params })
     }
 }
 
