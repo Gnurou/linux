@@ -59,15 +59,21 @@ pub(crate) struct RmAllocHeader {
 impl RmAllocHeader {
     /// Create a new alloc header
     #[expect(dead_code)]
-    pub(crate) fn new(h_parent: u32, h_object: u32, h_class: u32) -> Self {
+    pub(crate) fn new(
+        h_client: u32,
+        h_parent: u32,
+        h_object: u32,
+        h_class: u32,
+        params_size: u32,
+    ) -> Self {
         Self {
-            h_client: 0, // Will be set by RmApi
+            h_client,
             h_parent,
             h_object,
             h_class,
-            status: 0,      // Will be set by RmApi
-            params_size: 0, // Will be set by RmApi
-            flags: 0,       // Will be set by RmApi
+            status: 0,
+            params_size,
+            flags: 0,
             _padding: 0,
         }
     }
@@ -88,22 +94,6 @@ impl GspMessageElement for RmAllocHeader {
 }
 
 impl RmHeader for RmAllocHeader {
-    fn set_client(&mut self, client: u32) {
-        self.h_client = client;
-    }
-
-    fn set_status(&mut self, status: u32) {
-        self.status = status;
-    }
-
-    fn set_params_size(&mut self, size: u32) {
-        self.params_size = size;
-    }
-
-    fn set_flags(&mut self, flags: u32) {
-        self.flags = flags;
-    }
-
     fn get_status(&self) -> u32 {
         self.status
     }

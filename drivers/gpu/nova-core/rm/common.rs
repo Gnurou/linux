@@ -13,18 +13,6 @@ use kernel::{dev_err, dev_info};
 
 /// Trait for RM headers common to all RM API operations
 pub(crate) trait RmHeader: GspMessageElement {
-    /// Set the client handle of a request
-    fn set_client(&mut self, client: u32);
-
-    /// Set the status code of a request
-    fn set_status(&mut self, status: u32);
-
-    /// Set the parameters size of a request
-    fn set_params_size(&mut self, size: u32);
-
-    /// Set flags of a request
-    fn set_flags(&mut self, flags: u32);
-
     /// Get the status code of a response
     fn get_status(&self) -> u32;
 }
@@ -117,15 +105,9 @@ impl<'a> RmApi<'a> {
     /// Send an RM command with optional params and get response
     pub(crate) fn send<CMD: RmCommand<'a>, T: RmResponseElement>(
         &mut self,
-        mut header: CMD::Header,
+        header: CMD::Header,
         params: &'a [u8],
     ) -> Result<T> {
-        // Configure common header fields
-        header.set_client(self.gsp_info.h_internal_client);
-        header.set_status(0);
-        header.set_params_size(params.len() as u32);
-        header.set_flags(0);
-
         // Create and send the command
         let cmd = CMD::new(header, params);
         self.cmdq.send(self.bar, &cmd)?;
@@ -167,7 +149,7 @@ impl<'a> RmApi<'a> {
     }
 
     /// Get the internal subdevice handle (useful for control operations)
-    pub(crate) fn subdevice_handle(&self) -> u32 {
-        self.gsp_info.h_internal_subdevice
+    pub(crate) fn gsp_info(&'a self) -> &'a GspStaticConfigInfo {
+        self.gsp_info
     }
 }

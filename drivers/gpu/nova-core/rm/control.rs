@@ -4,7 +4,7 @@
 // RM control commands are used to query and configure various GPU resources.
 
 use super::common::{RmApi, RmCommand, RmHeader, RmMessage, RmResponseElement};
-use crate::gsp::{GspCommand, GspCommandElement, GspMessageElement};
+use crate::gsp::{GspCommand, GspCommandElement, GspMessageElement, GspStaticConfigInfo};
 use crate::nvfw::r570_144 as fw;
 use crate::sbuffer::SBuffer;
 use kernel::prelude::*;
@@ -57,14 +57,14 @@ pub(crate) struct RmControlHeader {
 
 impl RmControlHeader {
     /// Creates a new control header with the specified object handle and command
-    pub(crate) fn new(h_object: u32, cmd: u32) -> Self {
+    pub(crate) fn new<C: RmControl>(gsp_info: &GspStaticConfigInfo, control: &C) -> Self {
         Self {
-            h_client: 0, // Will be set by RmApi
-            h_object,
-            cmd,
-            status: 0,      // Will be set by RmApi
-            params_size: 0, // Will be set by RmApi
-            flags: 0,       // Will be set by RmApi
+            h_client: gsp_info.h_internal_client,
+            h_object: gsp_info.h_internal_subdevice,
+            cmd: C::CONTROL,
+            status: 0,
+            params_size: control.as_bytes().len() as u32,
+            flags: 0,
         }
     }
 }
@@ -73,7 +73,7 @@ impl RmControlHeader {
 impl<'a> RmApi<'a> {
     /// Send an RM control command with automatic object handle setup
     pub(crate) fn send_control<C: RmControl>(&mut self, params: &'a C) -> Result<C::Response> {
-        let header = RmControlHeader::new(self.subdevice_handle(), C::CONTROL);
+        let header = RmControlHeader::new(self.gsp_info(), params);
         self.send::<RmControlCmd<'a>, _>(header, params.as_bytes())
     }
 }
@@ -93,22 +93,6 @@ impl GspMessageElement for RmControlHeader {
 }
 
 impl RmHeader for RmControlHeader {
-    fn set_client(&mut self, client: u32) {
-        self.h_client = client;
-    }
-
-    fn set_status(&mut self, status: u32) {
-        self.status = status;
-    }
-
-    fn set_params_size(&mut self, size: u32) {
-        self.params_size = size;
-    }
-
-    fn set_flags(&mut self, flags: u32) {
-        self.flags = flags;
-    }
-
     fn get_status(&self) -> u32 {
         self.status
     }
