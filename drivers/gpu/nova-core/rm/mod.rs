@@ -8,7 +8,7 @@ pub(crate) mod common;
 pub(crate) mod control;
 
 // Re-export common types for convenience
-pub(crate) use common::{RmParams, RmResponseElement};
+pub(crate) use common::RmResponseElement;
 
 // Re-export alloc types
 /* unused for now: pub(crate) use alloc::{RmAlloc, RmAllocHeader}; */

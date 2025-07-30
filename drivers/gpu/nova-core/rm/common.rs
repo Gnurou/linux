@@ -87,11 +87,6 @@ pub(crate) trait RmCommand<'a>: GspCommand {
     fn new(header: Self::Header, params: Option<&'a [u8]>) -> Self;
 }
 
-/// Trait for input parameters
-pub(crate) trait RmParams {
-    fn to_bytes(&self) -> &[u8];
-}
-
 /// Trait for RM response message elements
 pub(crate) trait RmResponseElement: Sized {
     /// Parse response from bytes
@@ -124,12 +119,12 @@ impl<'a> RmApi<'a> {
     }
 
     /// Send an RM command with optional params and get response
-    pub(crate) fn send<CMD: RmCommand<'a>, P: RmParams, T: RmResponseElement>(
+    pub(crate) fn send<CMD: RmCommand<'a>, T: RmResponseElement>(
         &mut self,
         mut header: CMD::Header,
-        params: Option<&'a P>,
+        params: Option<&'a [u8]>,
     ) -> Result<T> {
-        let params_size = params.map_or(0, |p| p.to_bytes().len());
+        let params_size = params.map_or(0, |p| p.len());
 
         // Configure common header fields
         header.set_client(self.gsp_info.h_internal_client);
@@ -138,7 +133,7 @@ impl<'a> RmApi<'a> {
         header.set_flags(0);
 
         // Create and send the command
-        let cmd = CMD::new(header, params.map(|p| p.to_bytes()));
+        let cmd = CMD::new(header, params);
         self.cmdq.send(self.bar, &cmd)?;
 
         dev_info!(

@@ -3,11 +3,12 @@
 // RM Control implementation for nova-core
 // RM control commands are used to query and configure various GPU resources.
 
-use super::common::{RmApi, RmCommand, RmHeader, RmMessage, RmParams, RmResponseElement};
+use super::common::{RmApi, RmCommand, RmHeader, RmMessage, RmResponseElement};
 use crate::gsp::{GspCommand, GspCommandElement, GspMessageElement};
 use crate::nvfw::r570_144 as fw;
 use crate::sbuffer::SBuffer;
 use kernel::prelude::*;
+use kernel::transmute::AsBytes;
 
 /// Wrapper for RM Control commands
 pub(crate) struct RmControlCmd<'a>(pub(crate) RmMessage<'a, RmControlHeader>);
@@ -63,13 +64,13 @@ impl RmControlHeader {
 /// Extensions specific to RM Control operations
 impl<'a> RmApi<'a> {
     /// Send an RM control command with automatic object handle setup
-    pub(crate) fn send_control<P: RmParams, T: RmResponseElement>(
+    pub(crate) fn send_control<P: AsBytes, T: RmResponseElement>(
         &mut self,
         cmd: u32,
         params: Option<&'a P>,
     ) -> Result<T> {
         let header = RmControlHeader::new(self.subdevice_handle(), cmd);
-        self.send::<RmControlCmd<'a>, _, _>(header, params)
+        self.send::<RmControlCmd<'a>, _>(header, params.map(AsBytes::as_bytes))
     }
 }
 

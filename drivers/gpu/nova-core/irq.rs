@@ -3,9 +3,10 @@
 use crate::gsp::{GspCmdq, GspStaticConfigInfo};
 use crate::nvfw::r570_144 as fw;
 use crate::rm::common::RmApi;
-use crate::rm::{RmParams as RmControlParams, RmResponseElement as RmControlMessageElement};
+use crate::rm::RmResponseElement as RmControlMessageElement;
 use kernel::alloc::KVec;
 use kernel::prelude::*;
+use kernel::transmute::AsBytes;
 use kernel::{dev_info, device};
 
 // Category subtree map structure
@@ -33,20 +34,9 @@ struct IrqTableParams {
     pub table: [IrqTableEntry; fw::NV2080_CTRL_INTERNAL_INTR_MAX_TABLE_SIZE as usize],
     pub subtree_map: [SubtreeMap; fw::NV2080_INTR_CATEGORY_ENUM_COUNT as usize],
 }
+unsafe impl AsBytes for IrqTableParams {}
 
 impl_from_bytes!(IrqTableParams);
-
-impl RmControlParams for IrqTableParams {
-    fn to_bytes(&self) -> &[u8] {
-        // SAFETY: IrqTableParams is a fixed size struct whose size is known.
-        unsafe {
-            core::slice::from_raw_parts(
-                self as *const IrqTableParams as *const u8,
-                size_of::<IrqTableParams>(),
-            )
-        }
-    }
-}
 
 // Parsed interrupt table structure
 #[derive(Debug)]
