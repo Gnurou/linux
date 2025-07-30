@@ -94,16 +94,8 @@ pub(crate) struct GspStaticConfigInfo {
 }
 
 impl GspMessageElement for GspStaticConfigInfo {
-    fn new_from_sbuf(sbuf: &SBuffer<'_>) -> Result<Self> {
-        if size_of::<fw::GspStaticConfigInfo_t>() < sbuf.total_bytes {
-            return Err(EINVAL);
-        }
-
-        // SAFETY: We have confirmed the static info fits in the SBuffer
-        let static_info = unsafe {
-            let static_info_ptr = sbuf.as_ptr::<fw::GspStaticConfigInfo_t>(0)?;
-            &*static_info_ptr
-        };
+    fn new_from_sbuf<'a, I: Iterator<Item = &'a [u8]>>(sbuf: &mut SBuffer<I>) -> Result<Self> {
+        let static_info = fw::GspStaticConfigInfo_t::new_from_sbuf(sbuf)?;
 
         let gpu_name_str = static_info
             .gpuNameString
@@ -581,7 +573,7 @@ impl GspCommandElement for EmptyCmd {
 
 struct GetGspStaticInfo(EmptyCmd);
 impl GspCommandElement for GetGspStaticInfo {
-    fn copy_to_sbuf(&self, sbuf: &mut SBufferIteratorMut<'_, '_>) -> Result {
+    fn copy_to_sbuf<'a, I: Iterator<Item = &'a mut [u8]>>(&self, sbuf: &mut SBuffer<I>) -> Result {
         self.0.copy_to_sbuf(sbuf)
     }
 
