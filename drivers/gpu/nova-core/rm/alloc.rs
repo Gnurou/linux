@@ -26,7 +26,9 @@ impl<'a> GspCommand for RmAllocCmd<'a> {
     const FUNCTION: u32 = fw::NV_VGPU_MSG_FUNCTION_GSP_RM_ALLOC;
 }
 
-impl<'a> RmCommand<'a, RmAllocHeader> for RmAllocCmd<'a> {
+impl<'a> RmCommand<'a> for RmAllocCmd<'a> {
+    type Header = RmAllocHeader;
+
     fn new(header: RmAllocHeader, params: Option<&'a [u8]>) -> Self {
         Self(RmMessage { header, params })
     }

@@ -26,7 +26,9 @@ impl<'a> GspCommand for RmControlCmd<'a> {
     const FUNCTION: u32 = fw::NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL;
 }
 
-impl<'a> RmCommand<'a, RmControlHeader> for RmControlCmd<'a> {
+impl<'a> RmCommand<'a> for RmControlCmd<'a> {
+    type Header = RmControlHeader;
+
     fn new(header: RmControlHeader, params: Option<&'a [u8]>) -> Self {
         Self(RmMessage { header, params })
     }
@@ -67,7 +69,7 @@ impl<'a> RmApi<'a> {
         params: Option<&'a P>,
     ) -> Result<T> {
         let header = RmControlHeader::new(self.subdevice_handle(), cmd);
-        self.send::<RmControlCmd<'a>, _, _, _>(header, params)
+        self.send::<RmControlCmd<'a>, _, _>(header, params)
     }
 }
 

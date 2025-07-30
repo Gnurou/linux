@@ -81,8 +81,10 @@ impl<'a, H: RmHeader> GspCommandElement for RmMessage<'a, H> {
 }
 
 /// Trait for wrapping RmMessage into specific command types
-pub(crate) trait RmCommand<'a, H: RmHeader>: GspCommand {
-    fn new(header: H, params: Option<&'a [u8]>) -> Self;
+pub(crate) trait RmCommand<'a>: GspCommand {
+    type Header: RmHeader;
+
+    fn new(header: Self::Header, params: Option<&'a [u8]>) -> Self;
 }
 
 /// Trait for input parameters
@@ -122,14 +124,9 @@ impl<'a> RmApi<'a> {
     }
 
     /// Send an RM command with optional params and get response
-    pub(crate) fn send<
-        CMD: RmCommand<'a, HDR>,
-        HDR: RmHeader,
-        P: RmParams,
-        T: RmResponseElement,
-    >(
+    pub(crate) fn send<CMD: RmCommand<'a>, P: RmParams, T: RmResponseElement>(
         &mut self,
-        mut header: HDR,
+        mut header: CMD::Header,
         params: Option<&'a P>,
     ) -> Result<T> {
         let params_size = params.map_or(0, |p| p.to_bytes().len());
@@ -155,7 +152,10 @@ impl<'a> RmApi<'a> {
         // TODO: Should this be implemented as a receive(), similar to GSP RPC?
         // TODO: Should this be skipped in case usecase doesn't need a response?
         let response = wait_on_result(Delta::from_secs(5), || {
-            match self.cmdq.receive::<RmGspResponse<HDR>>(CMD::FUNCTION) {
+            match self
+                .cmdq
+                .receive::<RmGspResponse<CMD::Header>>(CMD::FUNCTION)
+            {
                 Ok(response) => Some(Ok(response)),
                 Err(EAGAIN) => None,
                 Err(e) => Some(Err(e)),
