@@ -35,6 +35,14 @@ impl<'a> RmCommand<'a> for RmControlCmd<'a> {
     }
 }
 
+pub(crate) trait RmControl: AsBytes {
+    // The control code corresponding to this parameter.
+    const CONTROL: u32;
+
+    // The expected response type.
+    type Response: RmResponseElement;
+}
+
 /// RM Control header structure
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy, Default)]
@@ -64,12 +72,8 @@ impl RmControlHeader {
 /// Extensions specific to RM Control operations
 impl<'a> RmApi<'a> {
     /// Send an RM control command with automatic object handle setup
-    pub(crate) fn send_control<P: AsBytes, T: RmResponseElement>(
-        &mut self,
-        cmd: u32,
-        params: &'a P,
-    ) -> Result<T> {
-        let header = RmControlHeader::new(self.subdevice_handle(), cmd);
+    pub(crate) fn send_control<C: RmControl>(&mut self, params: &'a C) -> Result<C::Response> {
+        let header = RmControlHeader::new(self.subdevice_handle(), C::CONTROL);
         self.send::<RmControlCmd<'a>, _>(header, params.as_bytes())
     }
 }

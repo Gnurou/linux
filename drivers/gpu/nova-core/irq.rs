@@ -3,6 +3,7 @@
 use crate::gsp::{GspCmdq, GspStaticConfigInfo};
 use crate::nvfw::r570_144 as fw;
 use crate::rm::common::RmApi;
+use crate::rm::control::RmControl;
 use crate::rm::RmResponseElement as RmControlMessageElement;
 use kernel::alloc::KVec;
 use kernel::prelude::*;
@@ -37,6 +38,12 @@ struct IrqTableParams {
 unsafe impl AsBytes for IrqTableParams {}
 
 impl_from_bytes!(IrqTableParams);
+
+impl RmControl for IrqTableParams {
+    const CONTROL: u32 = fw::NV2080_CTRL_CMD_INTERNAL_INTR_GET_KERNEL_TABLE;
+
+    type Response = IrqTable;
+}
 
 // Parsed interrupt table structure
 #[derive(Debug)]
@@ -93,8 +100,7 @@ pub(crate) fn dump_table<'a>(
         }; fw::NV2080_INTR_CATEGORY_ENUM_COUNT as usize],
     };
 
-    let table: IrqTable =
-        rm_control.send_control(fw::NV2080_CTRL_CMD_INTERNAL_INTR_GET_KERNEL_TABLE, &params)?;
+    let table: IrqTable = rm_control.send_control(&params)?;
 
     dev_info!(dev, "Interrupt table: {} entries\n", table.table_len);
     for (i, entry) in table.entries.iter().enumerate() {
