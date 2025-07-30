@@ -2,11 +2,10 @@
 //
 // RM alloc/free operation implementation
 
-use super::common::{RmApi, RmCommand, RmHeader, RmMessage};
-use crate::gsp::{GspCmdq, GspCommand, GspCommandElement, GspMessageElement, GspStaticConfigInfo};
+use super::common::{RmCommand, RmHeader, RmMessage};
+use crate::gsp::{GspCommand, GspCommandElement, GspMessageElement};
 use crate::nvfw::r570_144 as fw;
 use crate::sbuffer::SBuffer;
-use kernel::device;
 use kernel::prelude::*;
 
 /// Wrapper for RM Alloc commands
@@ -27,6 +26,7 @@ impl<'a, H: RmHeader> GspCommand for RmAllocCmd<'a, H> {
 }
 
 /// Alloc command wrapper implementation
+#[allow(dead_code)]
 pub(crate) struct AllocCommandWrapper;
 
 impl<H: RmHeader> RmCommand<H> for AllocCommandWrapper {
@@ -83,24 +83,6 @@ impl RmAllocHeader {
             flags: 0,       // Will be set by RmApi
             _padding: 0,
         }
-    }
-}
-
-/// Type alias for RM Alloc API
-#[allow(dead_code)]
-pub(crate) type RmAlloc<'a> = RmApi<'a, RmAllocHeader, AllocCommandWrapper>;
-
-/// Extensions specific to RM Alloc operations
-impl<'a> RmAlloc<'a> {
-    /// Create new RM alloc instance
-    #[expect(dead_code)]
-    pub(crate) fn new_alloc(
-        cmdq: &'a mut GspCmdq,
-        bar: &'a crate::driver::Bar0,
-        gsp_info: &'a GspStaticConfigInfo,
-        dev: &'a device::Device<device::Bound>,
-    ) -> Self {
-        Self::new(cmdq, bar, gsp_info, dev)
     }
 }
 

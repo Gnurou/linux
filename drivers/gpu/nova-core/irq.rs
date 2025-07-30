@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0
 
-use crate::rm::{RmControl, RmParams as RmControlParams, RmResponseElement as RmControlMessageElement};
 use crate::gsp::{GspCmdq, GspStaticConfigInfo};
 use crate::nvfw::r570_144 as fw;
+use crate::rm::common::RmApi;
+use crate::rm::{RmParams as RmControlParams, RmResponseElement as RmControlMessageElement};
 use kernel::alloc::KVec;
 use kernel::prelude::*;
 use kernel::{dev_info, device};
@@ -86,7 +87,7 @@ pub(crate) fn dump_table<'a>(
      */
     let cmdq_ref: &'a mut GspCmdq = unsafe { core::mem::transmute(cmdq) };
 
-    let mut rm_control = RmControl::new_control(cmdq_ref, bar, gsp_info, dev);
+    let mut rm_control = RmApi::new(cmdq_ref, bar, gsp_info, dev);
 
     let params = IrqTableParams {
         table_len: 0,

@@ -4,10 +4,9 @@
 // RM control commands are used to query and configure various GPU resources.
 
 use super::common::{RmApi, RmCommand, RmHeader, RmMessage, RmParams, RmResponseElement};
-use crate::gsp::{GspCmdq, GspCommand, GspCommandElement, GspMessageElement, GspStaticConfigInfo};
+use crate::gsp::{GspCommand, GspCommandElement, GspMessageElement};
 use crate::nvfw::r570_144 as fw;
 use crate::sbuffer::SBuffer;
-use kernel::device;
 use kernel::prelude::*;
 
 /// Wrapper for RM Control commands
@@ -74,21 +73,8 @@ impl RmControlHeader {
     }
 }
 
-/// Type alias for RM Control API
-pub(crate) type RmControl<'a> = RmApi<'a, RmControlHeader, ControlCommandWrapper>;
-
 /// Extensions specific to RM Control operations
-impl<'a> RmControl<'a> {
-    /// Create a new control API instance
-    pub(crate) fn new_control(
-        cmdq: &'a mut GspCmdq,
-        bar: &'a crate::driver::Bar0,
-        gsp_info: &'a GspStaticConfigInfo,
-        dev: &'a device::Device<device::Bound>,
-    ) -> Self {
-        Self::new(cmdq, bar, gsp_info, dev)
-    }
-
+impl<'a> RmApi<'a> {
     /// Send an RM control command with automatic object handle setup
     pub(crate) fn send_control<P: RmParams, T: RmResponseElement>(
         &mut self,
@@ -96,7 +82,7 @@ impl<'a> RmControl<'a> {
         params: Option<&P>,
     ) -> Result<T> {
         let header = RmControlHeader::new(self.subdevice_handle(), cmd);
-        self.send(header, params)
+        self.send::<ControlCommandWrapper, _, _, _>(header, params)
     }
 }
 

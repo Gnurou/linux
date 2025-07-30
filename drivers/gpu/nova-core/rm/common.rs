@@ -6,7 +6,6 @@
 use crate::gsp::{GspCmdq, GspCommand, GspCommandElement, GspMessageElement, GspStaticConfigInfo};
 use crate::sbuffer::SBuffer;
 use crate::util::wait_on_result;
-use core::marker::PhantomData;
 use kernel::device;
 use kernel::prelude::*;
 use kernel::time::Delta;
@@ -105,16 +104,14 @@ pub(crate) trait RmResponseElement: Sized {
 
 /// Generic RM API struct for all RM API operations
 /// An RmApi instance is created for control and alloc operations.
-pub(crate) struct RmApi<'a, HDR: RmHeader, CMD: RmCommand<HDR>> {
+pub(crate) struct RmApi<'a> {
     cmdq: &'a mut GspCmdq,
     bar: &'a crate::driver::Bar0,
     gsp_info: &'a GspStaticConfigInfo,
     dev: &'a device::Device<device::Bound>,
-    _header: PhantomData<HDR>,
-    _rm_cmd: PhantomData<CMD>,
 }
 
-impl<'a, HDR: RmHeader, CMD: RmCommand<HDR>> RmApi<'a, HDR, CMD> {
+impl<'a> RmApi<'a> {
     /// Create new RM API instance
     pub(crate) fn new(
         cmdq: &'a mut GspCmdq,
@@ -127,13 +124,11 @@ impl<'a, HDR: RmHeader, CMD: RmCommand<HDR>> RmApi<'a, HDR, CMD> {
             bar,
             gsp_info,
             dev,
-            _header: PhantomData,
-            _rm_cmd: PhantomData,
         }
     }
 
     /// Send an RM command with optional params and get response
-    pub(crate) fn send<P: RmParams, T: RmResponseElement>(
+    pub(crate) fn send<CMD: RmCommand<HDR>, HDR: RmHeader, P: RmParams, T: RmResponseElement>(
         &mut self,
         mut header: HDR,
         params: Option<&P>,
