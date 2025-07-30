@@ -3,10 +3,9 @@
 // RM alloc/free operation implementation
 
 use super::{RmCommand, RmHeader, RmMessage};
-use crate::gsp::{GspCommand, GspMessageElement};
+use crate::gsp::GspCommand;
 use crate::nvfw::r570_144 as fw;
-use crate::sbuffer::SBuffer;
-use kernel::prelude::*;
+use kernel::transmute::FromBytesSized;
 
 /// Wrapper for RM Alloc commands
 #[allow(dead_code)]
@@ -41,6 +40,7 @@ pub(crate) struct RmAllocHeader {
     /// Padding for 32-byte alignment
     _padding: u32,
 }
+unsafe impl FromBytesSized for RmAllocHeader {}
 
 impl RmAllocHeader {
     /// Create a new alloc header
@@ -61,20 +61,6 @@ impl RmAllocHeader {
             params_size,
             flags: 0,
             _padding: 0,
-        }
-    }
-}
-
-impl GspMessageElement for RmAllocHeader {
-    fn new_from_sbuf<'a, I: Iterator<Item = &'a [u8]>>(sbuf: &mut SBuffer<I>) -> Result<Self> {
-        let mut bytes = [0u8; core::mem::size_of::<RmAllocHeader>()];
-        sbuf.read_exact(&mut bytes)?;
-
-        // SAFETY: RmAllocHeader is repr(C, packed) and we're reading
-        // exactly size_of::<RmAllocHeader>() bytes
-        unsafe {
-            let header_ptr = bytes.as_ptr() as *const RmAllocHeader;
-            Ok(*header_ptr)
         }
     }
 }

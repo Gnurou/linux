@@ -5,10 +5,9 @@
 
 use super::{RmCommand, RmHeader, RmMessage, RmResponseElement};
 use crate::driver::Bar0;
-use crate::gsp::{GspCmdq, GspCommand, GspMessageElement, GspStaticConfigInfo};
+use crate::gsp::{GspCmdq, GspCommand, GspStaticConfigInfo};
 use crate::nvfw::r570_144 as fw;
-use crate::sbuffer::SBuffer;
-use kernel::transmute::AsBytes;
+use kernel::transmute::{AsBytes, FromBytesSized};
 use kernel::{device, prelude::*};
 
 /// Wrapper for RM Control commands
@@ -50,6 +49,7 @@ pub(crate) struct RmControlHeader {
     params_size: u32, // IN
     flags: u32,       // IN
 }
+unsafe impl FromBytesSized for RmControlHeader {}
 
 impl RmControlHeader {
     /// Creates a new control header with the specified object handle and command
@@ -78,20 +78,6 @@ impl GspCmdq {
         params: &C,
     ) -> Result<C::Response> {
         self.send_rm_command(dev, bar, &RmControlCmd::new(gsp_info, params))
-    }
-}
-
-impl GspMessageElement for RmControlHeader {
-    fn new_from_sbuf<'a, I: Iterator<Item = &'a [u8]>>(sbuf: &mut SBuffer<I>) -> Result<Self> {
-        let mut bytes = [0u8; core::mem::size_of::<RmControlHeader>()];
-        sbuf.read_exact(&mut bytes)?;
-
-        // SAFETY: RmControlHeader is repr(C, packed) and we're reading
-        // exactly size_of::<RmControlHeader>() bytes
-        unsafe {
-            let header_ptr = bytes.as_ptr() as *const RmControlHeader;
-            Ok(*header_ptr)
-        }
     }
 }
 
