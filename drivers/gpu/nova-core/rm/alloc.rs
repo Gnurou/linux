@@ -9,9 +9,9 @@ use crate::sbuffer::SBuffer;
 use kernel::prelude::*;
 
 /// Wrapper for RM Alloc commands
-pub(crate) struct RmAllocCmd<'a, H: RmHeader>(pub(crate) RmMessage<'a, H>);
+pub(crate) struct RmAllocCmd<'a>(pub(crate) RmMessage<'a, RmAllocHeader>);
 
-impl<'a, H: RmHeader> GspCommandElement for RmAllocCmd<'a, H> {
+impl<'a> GspCommandElement for RmAllocCmd<'a> {
     fn copy_to_sbuf<'b, I: Iterator<Item = &'b mut [u8]>>(&self, sbuf: &mut SBuffer<I>) -> Result {
         self.0.copy_to_sbuf(sbuf)
     }
@@ -21,7 +21,7 @@ impl<'a, H: RmHeader> GspCommandElement for RmAllocCmd<'a, H> {
     }
 }
 
-impl<'a, H: RmHeader> GspCommand for RmAllocCmd<'a, H> {
+impl<'a> GspCommand for RmAllocCmd<'a> {
     const FUNCTION: u32 = fw::NV_VGPU_MSG_FUNCTION_GSP_RM_ALLOC;
 }
 
@@ -29,16 +29,10 @@ impl<'a, H: RmHeader> GspCommand for RmAllocCmd<'a, H> {
 #[allow(dead_code)]
 pub(crate) struct AllocCommandWrapper;
 
-impl<H: RmHeader> RmCommand<H> for AllocCommandWrapper {
-    type Command<'a>
-        = RmAllocCmd<'a, H>
-    where
-        H: 'a;
+impl RmCommand<RmAllocHeader> for AllocCommandWrapper {
+    type Command<'a> = RmAllocCmd<'a>;
 
-    fn from_message<'a>(msg: RmMessage<'a, H>) -> Self::Command<'a>
-    where
-        H: 'a,
-    {
+    fn from_message<'a>(msg: RmMessage<'a, RmAllocHeader>) -> Self::Command<'a> {
         RmAllocCmd(msg)
     }
 }

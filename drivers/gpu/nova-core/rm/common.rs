@@ -85,9 +85,7 @@ pub(crate) trait RmCommand<H: RmHeader> {
     type Command<'a>: GspCommand + GspCommandElement
     where
         H: 'a;
-    fn from_message<'a>(msg: RmMessage<'a, H>) -> Self::Command<'a>
-    where
-        H: 'a;
+    fn from_message<'a>(msg: RmMessage<'a, H>) -> Self::Command<'a>;
 }
 
 /// Trait for input parameters

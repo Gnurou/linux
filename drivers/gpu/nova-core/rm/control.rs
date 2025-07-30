@@ -10,9 +10,9 @@ use crate::sbuffer::SBuffer;
 use kernel::prelude::*;
 
 /// Wrapper for RM Control commands
-pub(crate) struct RmControlCmd<'a, H: RmHeader>(pub(crate) RmMessage<'a, H>);
+pub(crate) struct RmControlCmd<'a>(pub(crate) RmMessage<'a, RmControlHeader>);
 
-impl<'a, H: RmHeader> GspCommandElement for RmControlCmd<'a, H> {
+impl<'a> GspCommandElement for RmControlCmd<'a> {
     fn copy_to_sbuf<'b, I: Iterator<Item = &'b mut [u8]>>(&self, sbuf: &mut SBuffer<I>) -> Result {
         self.0.copy_to_sbuf(sbuf)
     }
@@ -22,23 +22,17 @@ impl<'a, H: RmHeader> GspCommandElement for RmControlCmd<'a, H> {
     }
 }
 
-impl<'a, H: RmHeader> GspCommand for RmControlCmd<'a, H> {
+impl<'a> GspCommand for RmControlCmd<'a> {
     const FUNCTION: u32 = fw::NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL;
 }
 
 /// Control command wrapper implementation
 pub(crate) struct ControlCommandWrapper;
 
-impl<H: RmHeader> RmCommand<H> for ControlCommandWrapper {
-    type Command<'a>
-        = RmControlCmd<'a, H>
-    where
-        H: 'a;
+impl RmCommand<RmControlHeader> for ControlCommandWrapper {
+    type Command<'a> = RmControlCmd<'a>;
 
-    fn from_message<'a>(msg: RmMessage<'a, H>) -> Self::Command<'a>
-    where
-        H: 'a,
-    {
+    fn from_message<'a>(msg: RmMessage<'a, RmControlHeader>) -> Self::Command<'a> {
         RmControlCmd(msg)
     }
 }
