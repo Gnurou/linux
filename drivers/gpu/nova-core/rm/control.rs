@@ -30,9 +30,14 @@ impl<'a> GspCommand for RmControlCmd<'a> {
 
 impl<'a> RmCommand<'a> for RmControlCmd<'a> {
     type Header = RmControlHeader;
+}
 
-    fn new(header: RmControlHeader, params: &'a [u8]) -> Self {
-        Self(RmMessage { header, params })
+impl<'a> RmControlCmd<'a> {
+    fn new<C: RmControl>(gsp_info: &GspStaticConfigInfo, params: &'a C) -> Self {
+        Self(RmMessage {
+            header: RmControlHeader::new(gsp_info, params),
+            params: params.as_bytes(),
+        })
     }
 }
 
@@ -82,11 +87,7 @@ impl GspCmdq {
         gsp_info: &GspStaticConfigInfo,
         params: &C,
     ) -> Result<C::Response> {
-        self.send_rm_command(
-            dev,
-            bar,
-            &RmControlCmd::new(RmControlHeader::new(gsp_info, params), params.as_bytes()),
-        )
+        self.send_rm_command(dev, bar, &RmControlCmd::new(gsp_info, params))
     }
 }
 

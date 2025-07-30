@@ -28,10 +28,6 @@ impl<'a> GspCommand for RmAllocCmd<'a> {
 
 impl<'a> RmCommand<'a> for RmAllocCmd<'a> {
     type Header = RmAllocHeader;
-
-    fn new(header: RmAllocHeader, params: &'a [u8]) -> Self {
-        Self(RmMessage { header, params })
-    }
 }
 
 /// RM Alloc header structure (32 bytes)

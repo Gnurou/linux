@@ -68,8 +68,6 @@ impl<'a, H: RmHeader> GspCommandElement for RmMessage<'a, H> {
 /// Trait for wrapping RmMessage into specific command types
 pub(crate) trait RmCommand<'a>: GspCommand {
     type Header: RmHeader;
-
-    fn new(header: Self::Header, params: &'a [u8]) -> Self;
 }
 
 /// Trait for RM response message elements
