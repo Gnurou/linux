@@ -30,7 +30,7 @@ impl<'a> GspCommand for RmControlCmd<'a> {
 impl<'a> RmCommand<'a> for RmControlCmd<'a> {
     type Header = RmControlHeader;
 
-    fn new(header: RmControlHeader, params: Option<&'a [u8]>) -> Self {
+    fn new(header: RmControlHeader, params: &'a [u8]) -> Self {
         Self(RmMessage { header, params })
     }
 }
@@ -67,10 +67,10 @@ impl<'a> RmApi<'a> {
     pub(crate) fn send_control<P: AsBytes, T: RmResponseElement>(
         &mut self,
         cmd: u32,
-        params: Option<&'a P>,
+        params: &'a P,
     ) -> Result<T> {
         let header = RmControlHeader::new(self.subdevice_handle(), cmd);
-        self.send::<RmControlCmd<'a>, _>(header, params.map(AsBytes::as_bytes))
+        self.send::<RmControlCmd<'a>, _>(header, params.as_bytes())
     }
 }
 

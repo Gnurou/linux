@@ -93,10 +93,8 @@ pub(crate) fn dump_table<'a>(
         }; fw::NV2080_INTR_CATEGORY_ENUM_COUNT as usize],
     };
 
-    let table: IrqTable = rm_control.send_control(
-        fw::NV2080_CTRL_CMD_INTERNAL_INTR_GET_KERNEL_TABLE,
-        Some(&params),
-    )?;
+    let table: IrqTable =
+        rm_control.send_control(fw::NV2080_CTRL_CMD_INTERNAL_INTR_GET_KERNEL_TABLE, &params)?;
 
     dev_info!(dev, "Interrupt table: {} entries\n", table.table_len);
     for (i, entry) in table.entries.iter().enumerate() {

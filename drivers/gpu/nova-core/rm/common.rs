@@ -53,7 +53,7 @@ impl<H: RmHeader> GspMessageElement for RmGspResponse<H> {
 /// TODO: Shall we combine this and RmGspResponse?
 pub(crate) struct RmMessage<'a, H: RmHeader> {
     pub(crate) header: H,
-    pub(crate) params: Option<&'a [u8]>,
+    pub(crate) params: &'a [u8],
 }
 
 impl<'a, H: RmHeader> GspCommandElement for RmMessage<'a, H> {
@@ -66,17 +66,13 @@ impl<'a, H: RmHeader> GspCommandElement for RmMessage<'a, H> {
             )
         };
         sbuf.write_all(header_bytes)?;
-
-        // Write params if present
-        if let Some(params) = self.params {
-            sbuf.write_all(params)?;
-        }
+        sbuf.write_all(self.params)?;
 
         Ok(())
     }
 
     fn size(&self) -> usize {
-        core::mem::size_of::<H>() + self.params.map_or(0, |p| p.len())
+        core::mem::size_of::<H>() + self.params.len()
     }
 }
 
@@ -84,7 +80,7 @@ impl<'a, H: RmHeader> GspCommandElement for RmMessage<'a, H> {
 pub(crate) trait RmCommand<'a>: GspCommand {
     type Header: RmHeader;
 
-    fn new(header: Self::Header, params: Option<&'a [u8]>) -> Self;
+    fn new(header: Self::Header, params: &'a [u8]) -> Self;
 }
 
 /// Trait for RM response message elements
@@ -122,14 +118,12 @@ impl<'a> RmApi<'a> {
     pub(crate) fn send<CMD: RmCommand<'a>, T: RmResponseElement>(
         &mut self,
         mut header: CMD::Header,
-        params: Option<&'a [u8]>,
+        params: &'a [u8],
     ) -> Result<T> {
-        let params_size = params.map_or(0, |p| p.len());
-
         // Configure common header fields
         header.set_client(self.gsp_info.h_internal_client);
         header.set_status(0);
-        header.set_params_size(params_size as u32);
+        header.set_params_size(params.len() as u32);
         header.set_flags(0);
 
         // Create and send the command
@@ -140,7 +134,7 @@ impl<'a> RmApi<'a> {
             self.dev,
             "RM API: Sent function {:#x} with {} bytes params\n",
             CMD::FUNCTION,
-            params_size
+            params.len()
         );
 
         // Wait for response
