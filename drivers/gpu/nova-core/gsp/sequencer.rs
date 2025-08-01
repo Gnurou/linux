@@ -437,7 +437,6 @@ impl<'a> GspSequencer<'a> {
         dev_dbg!(dev, "CPU Sequencer commands completed successfully\n");
 
         drop(sbuf);
-        msg.ack()?;
 
         Ok(())
     }

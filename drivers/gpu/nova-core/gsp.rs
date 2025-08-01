@@ -345,11 +345,11 @@ impl<'a> GspQueueMessage<'a> {
 
         Ok((msg, sbuf))
     }
+}
 
-    fn ack(self) -> Result {
-        self.cmdq.ack_msg(self.header.length)?;
-
-        Ok(())
+impl<'a> Drop for GspQueueMessage<'a> {
+    fn drop(&mut self) {
+        self.cmdq.ack_msg(self.header.length);
     }
 }
 
@@ -642,19 +642,17 @@ impl GspCmdq {
         Ok(gspq_msg)
     }
 
-    fn ack_msg(self: &mut Self, length: u32) -> Result {
+    fn ack_msg(self: &mut Self, length: u32) {
         const HEADER_SIZE: u32 = (size_of::<GspMsgHeader>() + size_of::<GspRpcHeader>()) as u32;
-        let mut rptr = self.cpu_rptr()?;
+        let mut rptr = self.cpu_rptr().unwrap();
         rptr = rptr + (HEADER_SIZE + length).div_ceil(GSP_PAGE_SIZE as u32);
         rptr %= MSGQ_NUM_PAGES as u32;
 
         // TODO: Figure out Rust barriers
         unsafe {
             asm!("mfence";);
-            dma_write!(self.gsp_mem[0].cpuq.rx.read_ptr = rptr)?;
+            dma_write!(self.gsp_mem[0].cpuq.rx.read_ptr = rptr).unwrap();
         };
-
-        Ok(())
     }
 
     pub(crate) fn gsp_init_done(&mut self, timeout: Delta) -> Result {
@@ -668,8 +666,6 @@ impl GspCmdq {
             }?;
 
             let init_done = msg.try_as::<GspInitDone>().map(|_| ());
-
-            msg.ack()?;
 
             match init_done {
                 Ok(_) => break Ok(()),
@@ -767,7 +763,6 @@ impl GspCmdq {
             bar2_pdb: info.bar2PdeBase,
         };
 
-        msg.ack()?;
         Ok(config_info)
     }
 }
