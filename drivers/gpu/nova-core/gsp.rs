@@ -335,11 +335,7 @@ impl<'a> GspQueueMessage<'a> {
         // Ok((msg, slice_1, slice_2))
 
         let sbuf = if data_size > 0 {
-            if let Some(slice) = self.slice_2 {
-                Some(SBuffer::new_reader([data, slice]))
-            } else {
-                Some(SBuffer::new_reader([data, &[]]))
-            }
+            Some(SBuffer::new_reader([data, self.slice_2.unwrap_or(&[])]))
         } else {
             None
         };
@@ -679,10 +675,7 @@ impl GspCmdq {
                 };
             }?;
 
-            let init_done = match msg.try_as::<GspInitDone>() {
-                Ok(_) => Ok(()),
-                Err(e) => Err(e),
-            };
+            let init_done = msg.try_as::<GspInitDone>().map(|_| ());
 
             msg.ack()?;
 
@@ -721,10 +714,7 @@ impl GspCmdq {
             };
         }?;
 
-        let info = match msg.try_as::<fw::GspStaticConfigInfo_t>() {
-            Ok((x, _)) => Ok(x),
-            Err(e) => Err(e),
-        }?;
+        let info = msg.try_as::<fw::GspStaticConfigInfo_t>().map(|(x, _)| x)?;
 
         let gpu_name_str = info
             .gpuNameString
