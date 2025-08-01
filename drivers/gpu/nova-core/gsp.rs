@@ -389,34 +389,34 @@ impl GspCmdq {
         })
     }
 
-    // We need the next four accessors because the dma_read macro is failable
-    // and uses `?` which requires any calling function to return a Result<>.
-    // However in the first instance a dma_read failure probably needs to be dealt with
-    // by the function trying to do the read, so we need the accessors to permit that.
-    //
-    // Of course at the moment we "deal" with errors by panicing...
-    //
-    // I think we need to update the dma macro's to return a Result<u32>
-    fn cpu_wptr(self: &Self) -> Result<u32> {
-        dma_read!(self.gsp_mem[0].cpuq.tx.write_ptr)
+    fn cpu_wptr(self: &Self) -> u32 {
+        // SAFETY: index `0` is valid as `gsp_mem` has been allocated accordingly, thus the access
+        // cannot fail.
+        unsafe { dma_read!(self.gsp_mem[0].cpuq.tx.write_ptr).unwrap_unchecked() }
     }
 
-    fn gsp_rptr(self: &Self) -> Result<u32> {
-        dma_read!(self.gsp_mem[0].gspq.rx.read_ptr)
+    fn gsp_rptr(self: &Self) -> u32 {
+        // SAFETY: index `0` is valid as `gsp_mem` has been allocated accordingly, thus the access
+        // cannot fail.
+        unsafe { dma_read!(self.gsp_mem[0].gspq.rx.read_ptr).unwrap_unchecked() }
     }
 
-    fn cpu_rptr(self: &Self) -> Result<u32> {
-        dma_read!(self.gsp_mem[0].cpuq.rx.read_ptr)
+    fn cpu_rptr(self: &Self) -> u32 {
+        // SAFETY: index `0` is valid as `gsp_mem` has been allocated accordingly, thus the access
+        // cannot fail.
+        unsafe { dma_read!(self.gsp_mem[0].cpuq.rx.read_ptr).unwrap_unchecked() }
     }
 
-    fn gsp_wptr(self: &Self) -> Result<u32> {
-        dma_read!(self.gsp_mem[0].gspq.tx.write_ptr)
+    fn gsp_wptr(self: &Self) -> u32 {
+        // SAFETY: index `0` is valid as `gsp_mem` has been allocated accordingly, thus the access
+        // cannot fail.
+        unsafe { dma_read!(self.gsp_mem[0].gspq.tx.write_ptr).unwrap_unchecked() }
     }
 
     // Returns the numbers of pages free for sending an RPC to GSP.
     fn free_tx_pages(self: &Self) -> u32 {
-        let wptr = self.cpu_wptr().unwrap();
-        let rptr = self.gsp_rptr().unwrap();
+        let wptr = self.cpu_wptr();
+        let rptr = self.gsp_rptr();
         let mut free = rptr + self.msg_count - wptr - 1;
 
         if free >= self.msg_count {
@@ -428,8 +428,8 @@ impl GspCmdq {
 
     // Returns the number of pages the GSP has written to the queue.
     fn used_rx_pages(self: &Self) -> u32 {
-        let rptr = self.cpu_rptr().unwrap();
-        let wptr = self.gsp_wptr().unwrap();
+        let rptr = self.cpu_rptr();
+        let wptr = self.gsp_wptr();
         let mut used = wptr + self.msg_count - rptr;
         if used >= self.msg_count {
             used -= self.msg_count;
@@ -451,7 +451,7 @@ impl GspCmdq {
         let msg_size = cmd_size.div_ceil(GSP_PAGE_SIZE);
 
         while self.free_tx_pages() < msg_size as u32 {}
-        let wptr = self.cpu_wptr().unwrap() as usize;
+        let wptr = self.cpu_wptr() as usize;
         let ptr = unsafe {
             core::ptr::addr_of_mut!((*self.gsp_mem.start_ptr_mut()).cpuq.msgq.data[wptr])
         };
@@ -542,14 +542,16 @@ impl GspCmdq {
         sbuf.write_all(msg_header.as_bytes())?;
         drop(sbuf);
 
-        let mut wptr = self.cpu_wptr().unwrap() as u32;
+        let mut wptr = self.cpu_wptr() as u32;
         wptr += msg_header.elem_count as u32;
         wptr %= MSGQ_NUM_PAGES as u32;
 
         // TODO: Figure out Rust barriers
         unsafe {
             asm!("sfence";);
-            dma_write!(self.gsp_mem[0].cpuq.tx.write_ptr = wptr)?;
+            // SAFETY: index `0` is valid as `gsp_mem` has been allocated accordingly, thus the access
+            // cannot fail.
+            dma_write!(self.gsp_mem[0].cpuq.tx.write_ptr = wptr).unwrap_unchecked();
             asm!("mfence";);
         };
 
@@ -569,7 +571,7 @@ impl GspCmdq {
             return Err(EAGAIN);
         }
 
-        let rptr = self.cpu_rptr().unwrap();
+        let rptr = self.cpu_rptr();
 
         // Remaining number of bytes left before we have to wrap
         let remaining = if rptr + used_pages > self.msg_count {
@@ -644,14 +646,16 @@ impl GspCmdq {
 
     fn ack_msg(self: &mut Self, length: u32) {
         const HEADER_SIZE: u32 = (size_of::<GspMsgHeader>() + size_of::<GspRpcHeader>()) as u32;
-        let mut rptr = self.cpu_rptr().unwrap();
+        let mut rptr = self.cpu_rptr();
         rptr = rptr + (HEADER_SIZE + length).div_ceil(GSP_PAGE_SIZE as u32);
         rptr %= MSGQ_NUM_PAGES as u32;
 
         // TODO: Figure out Rust barriers
         unsafe {
             asm!("mfence";);
-            dma_write!(self.gsp_mem[0].cpuq.rx.read_ptr = rptr).unwrap();
+            // SAFETY: index `0` is valid as `gsp_mem` has been allocated accordingly, thus the access
+            // cannot fail.
+            dma_write!(self.gsp_mem[0].cpuq.rx.read_ptr = rptr).unwrap_unchecked();
         };
     }
 
