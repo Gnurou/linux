@@ -16,6 +16,7 @@ use kernel::pr_info;
 use kernel::prelude::*;
 use kernel::time::Delta;
 use kernel::transmute::{AsBytes, FromBytes, FromBytesSized};
+use kernel::types::ARef;
 use kernel::{dma_read, dma_write};
 
 use crate::dma::DmaObject;
@@ -299,6 +300,8 @@ unsafe impl AsBytes for GspMem {}
 unsafe impl Send for GspCmdq {}
 
 pub(crate) struct GspCmdq {
+    // Used for logging.
+    dev: ARef<device::Device>,
     msg_count: u32,
     seq: u32,
     gsp_mem: CoherentAllocation<GspMem>,
@@ -378,6 +381,7 @@ impl GspCmdq {
         )?;
 
         Ok(GspCmdq {
+            dev: dev.into(),
             msg_count: MSG_COUNT,
             seq: 0,
             gsp_mem,
@@ -481,12 +485,7 @@ impl GspCmdq {
         }
     }
 
-    pub(crate) fn send<A: GspCommand>(
-        &mut self,
-        dev: &device::Device<device::Bound>,
-        bar: &Bar0,
-        cmd: &A,
-    ) -> Result<()> {
+    pub(crate) fn send<A: GspCommand>(&mut self, bar: &Bar0, cmd: &A) -> Result<()> {
         let mut msg_header = GspMsgHeader {
             auth_tag_buffer: [0; 16],
             aad_buffer: [0; 16],
@@ -511,7 +510,7 @@ impl GspCmdq {
 
         // Log RPC send with message type decoding
         dev_dbg!(
-            dev,
+            &self.dev,
             "GSP RPC: send: Call {} - used_pages={}, function=0x{:x} ({}), header_size={}\n",
             self.seq - 1,
             cmd_len.div_ceil(GSP_PAGE_SIZE),
@@ -561,10 +560,7 @@ impl GspCmdq {
         Ok(())
     }
 
-    fn receive_msg<'a>(
-        self: &'a mut Self,
-        dev: &device::Device<device::Bound>,
-    ) -> Result<GspQueueMessage<'a>> {
+    fn receive_msg(self: &mut Self) -> Result<GspQueueMessage> {
         const HEADER_SIZE: u32 = (size_of::<GspMsgHeader>() + size_of::<GspRpcHeader>()) as u32;
 
         // Used pages contains the total number of pages available to consume
@@ -607,7 +603,7 @@ impl GspCmdq {
 
         // Log RPC receive with message type decoding
         dev_dbg!(
-            dev,
+            &self.dev,
             "GSP RPC: receive: Call {} - used_pages={}, function=0x{:x} ({}), header_size={}\n",
             rpc.sequence,
             used_pages,
@@ -661,14 +657,10 @@ impl GspCmdq {
         Ok(())
     }
 
-    pub(crate) fn gsp_init_done(
-        &mut self,
-        dev: &device::Device<device::Bound>,
-        timeout: Delta,
-    ) -> Result {
+    pub(crate) fn gsp_init_done(&mut self, timeout: Delta) -> Result {
         loop {
             let msg = loop {
-                match self.receive_msg(dev) {
+                match self.receive_msg() {
                     Ok(x) => break Ok(x),
                     Err(EAGAIN) => continue,
                     Err(x) => break Err(x),
@@ -687,13 +679,8 @@ impl GspCmdq {
         }
     }
 
-    pub(crate) fn get_gsp_info(
-        &mut self,
-        dev: &device::Device<device::Bound>,
-        bar: &Bar0,
-    ) -> Result<GspStaticConfigInfo> {
+    pub(crate) fn get_gsp_info(&mut self, bar: &Bar0) -> Result<GspStaticConfigInfo> {
         self.send(
-            dev,
             bar,
             &GetGspStaticInfo(EmptyCmd {
                 size: size_of::<fw::GspStaticConfigInfo_t>(),
@@ -707,7 +694,7 @@ impl GspCmdq {
         // });
 
         let msg = loop {
-            match self.receive_msg(dev) {
+            match self.receive_msg() {
                 Ok(x) => break Ok(x),
                 Err(EAGAIN) => continue,
                 Err(x) => break Err(x),
@@ -1042,7 +1029,7 @@ impl GspCommand for RegistryTable {
     const FUNCTION: u32 = fw::NV_VGPU_MSG_FUNCTION_SET_REGISTRY;
 }
 
-fn build_registry(dev: &device::Device<device::Bound>, bar: &Bar0, cmdq: &mut GspCmdq) {
+fn build_registry(bar: &Bar0, cmdq: &mut GspCmdq) {
     let registry = RegistryTable {
         entries: [
             RegistryEntry {
@@ -1056,7 +1043,7 @@ fn build_registry(dev: &device::Device<device::Bound>, bar: &Bar0, cmdq: &mut Gs
         ],
     };
 
-    cmdq.send(dev, bar, &registry).unwrap();
+    cmdq.send(bar, &registry).unwrap();
 }
 
 impl GspCommand for fw::GspSystemInfo {
@@ -1084,7 +1071,7 @@ fn set_system_info(dev: &pci::Device<device::Bound>, bar: &Bar0, cmdq: &mut GspC
     info.bIsPrimary = 0;
     info.bPreserveVideoMemoryAllocations = 0;
 
-    cmdq.send(dev.as_ref(), bar, &info)?;
+    cmdq.send(bar, &info)?;
     Ok(())
 }
 
@@ -1149,7 +1136,7 @@ impl GspMemObjects {
         dma_write!(rmargs[0].bDmemStack = 1)?;
 
         set_system_info(pdev, bar, &mut cmdq)?;
-        build_registry(dev, bar, &mut cmdq);
+        build_registry(bar, &mut cmdq);
 
         Ok(GspMemObjects {
             libos,

@@ -458,11 +458,9 @@ impl Gpu {
             Delta::from_secs(10),
         )?;
 
-        libos
-            .cmdq
-            .gsp_init_done(pdev.as_ref(), Delta::from_secs(10))?;
+        libos.cmdq.gsp_init_done(Delta::from_secs(10))?;
 
-        let gsp_info = libos.cmdq.get_gsp_info(pdev.as_ref(), bar)?;
+        let gsp_info = libos.cmdq.get_gsp_info(bar)?;
 
         dev_info!(
             pdev.as_ref(),

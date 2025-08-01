@@ -394,7 +394,7 @@ impl<'a> GspSequencer<'a> {
         timeout: Delta,
     ) -> Result {
         let msg = loop {
-            match cmdq.receive_msg(dev) {
+            match cmdq.receive_msg() {
                 Ok(x) => break Ok(x),
                 Err(EAGAIN) => continue,
                 Err(x) => break Err(x),
