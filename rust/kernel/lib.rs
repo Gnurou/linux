@@ -17,6 +17,7 @@
 // the unstable features in use.
 //
 // Stable since Rust 1.79.0.
+#![feature(generic_nonzero)]
 #![feature(inline_const)]
 #![feature(pointer_is_aligned)]
 //
@@ -114,6 +115,7 @@ pub mod platform;
 pub mod prelude;
 pub mod print;
 pub mod processor;
+pub mod ptr;
 pub mod rbtree;
 pub mod regulator;
 pub mod revocable;
