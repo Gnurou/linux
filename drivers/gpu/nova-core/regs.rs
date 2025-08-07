@@ -300,6 +300,34 @@ register!(NV_PFALCON_FALCON_CPUCTL_ALIAS @ PFalconBase[0x00000130] {
     1:1     startcpu as bool;
 });
 
+// TODO[REGA]: this is an array of registers.
+register!(NV_PFALCON_FALCON_IMEMC @ PFalconBase[0x00000180] {
+    15:0      offs as u16;
+    24:24     aincw as bool;
+    28:28     secure as bool;
+});
+
+// TODO[REGA]: this is an array of registers.
+register!(NV_PFALCON_FALCON_IMEMD @ PFalconBase[0x00000184] {
+    31:0      data as u32;
+});
+
+// TODO[REGA]: this is an array of registers.
+register!(NV_PFALCON_FALCON_IMEMT @ PFalconBase[0x00000188] {
+    15:0      tag as u16;
+});
+
+// TODO[REGA]: this is an array of registers.
+register!(NV_PFALCON_FALCON_DMEMC @ PFalconBase[0x000001c0] {
+    15:0      offs as u16;
+    24:24     aincw as bool;
+});
+
+// TODO[REGA]: this is an array of registers.
+register!(NV_PFALCON_FALCON_DMEMD @ PFalconBase[0x000001c4[4]] {
+    31:0      data as u32;
+});
+
 // Actually known as `NV_PSEC_FALCON_ENGINE` and `NV_PGSP_FALCON_ENGINE` depending on the falcon
 // instance.
 register!(NV_PFALCON_FALCON_ENGINE @ PFalconBase[0x000003c0] {
@@ -336,6 +364,10 @@ register!(NV_PFALCON2_FALCON_BROM_PARAADDR @ PFalcon2Base[0x00000210[1]] {
 });
 
 // PRISCV
+
+register!(NV_PRISCV_RISCV_CORE_SWITCH_RISCV_STATUS @ PFalcon2Base[0x00000240] {
+    0:0     active_stat as bool;
+});
 
 register!(NV_PRISCV_RISCV_CPUCTL @ PFalcon2Base[0x00000388] {
     0:0     halted as bool;
