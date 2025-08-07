@@ -4,7 +4,7 @@
 
 use crate::driver::Bar0;
 use crate::firmware::fwsec::Bcrt30Rsa3kSignature;
-use crate::firmware::FalconUCodeDescV3;
+use crate::firmware::{FalconUCodeDesc, FalconUCodeDescV2, FalconUCodeDescV3};
 use core::convert::TryFrom;
 use kernel::device;
 use kernel::error::Result;
@@ -1026,19 +1026,10 @@ impl FwSecBiosBuilder {
 }
 
 impl FwSecBiosImage {
-    /// Get the FwSec header ([`FalconUCodeDescV3`]).
-    pub(crate) fn header(&self) -> Result<&FalconUCodeDescV3> {
+    /// Get the FwSec header ([`FalconUCodeDesc`]).
+    pub(crate) fn header(&self) -> Result<FalconUCodeDesc> {
         // Get the falcon ucode offset that was found in setup_falcon_data.
         let falcon_ucode_offset = self.falcon_ucode_offset;
-
-        // Make sure the offset is within the data bounds.
-        if falcon_ucode_offset + core::mem::size_of::<FalconUCodeDescV3>() > self.base.data.len() {
-            dev_err!(
-                self.base.dev,
-                "fwsec-frts header not contained within BIOS bounds\n"
-            );
-            return Err(ERANGE);
-        }
 
         // Read the first 4 bytes to get the version.
         let hdr_bytes: [u8; 4] = self.base.data[falcon_ucode_offset..falcon_ucode_offset + 4]
@@ -1047,33 +1038,60 @@ impl FwSecBiosImage {
         let hdr = u32::from_le_bytes(hdr_bytes);
         let ver = (hdr & 0xff00) >> 8;
 
-        if ver != 3 {
-            dev_err!(self.base.dev, "invalid fwsec firmware version: {:?}\n", ver);
-            return Err(EINVAL);
+        let hdr_size = match ver {
+            2 => core::mem::size_of::<FalconUCodeDescV2>(),
+            3 => core::mem::size_of::<FalconUCodeDescV3>(),
+            _ => {
+                dev_err!(self.base.dev, "unsupported fwsec version {}\n", ver);
+                return Err(EINVAL);
+            }
+        };
+        // Make sure the offset is within the data bounds
+        if falcon_ucode_offset + hdr_size > self.base.data.len() {
+            dev_err!(
+                self.base.dev,
+                "fwsec-frts header not contained within BIOS bounds\n"
+            );
+            return Err(ERANGE);
         }
 
-        // Return a reference to the FalconUCodeDescV3 structure.
-        //
-        // SAFETY: We have checked that `falcon_ucode_offset + size_of::<FalconUCodeDescV3>` is
-        // within the bounds of `data`. Also, this data vector is from ROM, and the `data` field
-        // in `BiosImageBase` is immutable after construction.
-        Ok(unsafe {
+        let v2 = unsafe {
+            &*(self
+                .base
+                .data
+                .as_ptr()
+                .add(falcon_ucode_offset)
+                .cast::<FalconUCodeDescV2>())
+        };
+
+        let v3 = unsafe {
             &*(self
                 .base
                 .data
                 .as_ptr()
                 .add(falcon_ucode_offset)
                 .cast::<FalconUCodeDescV3>())
-        })
+        };
+
+        // Return a FalconUCodeDesc structure.
+        //
+        // SAFETY: We have checked that `falcon_ucode_offset + size_of::<FalconUCodeDesc>` is
+        // within the bounds of `data`. Also, this data vector is from ROM, and the `data` field
+        // in `BiosImageBase` is immutable after construction.
+        match ver {
+            2 => Ok(FalconUCodeDesc::V2(v2.clone())),
+            3 => Ok(FalconUCodeDesc::V3(v3.clone())),
+            _ => Err(EINVAL),
+        }
     }
 
     /// Get the ucode data as a byte slice
-    pub(crate) fn ucode(&self, desc: &FalconUCodeDescV3) -> Result<&[u8]> {
+    pub(crate) fn ucode(&self, desc: &FalconUCodeDesc) -> Result<&[u8]> {
         let falcon_ucode_offset = self.falcon_ucode_offset;
 
         // The ucode data follows the descriptor.
         let ucode_data_offset = falcon_ucode_offset + desc.size();
-        let size = (desc.imem_load_size + desc.dmem_load_size) as usize;
+        let size = (desc.imem_load_size() + desc.dmem_load_size()) as usize;
 
         // Get the data slice, checking bounds in a single operation.
         self.base
@@ -1089,11 +1107,15 @@ impl FwSecBiosImage {
     }
 
     /// Get the signatures as a byte slice
-    pub(crate) fn sigs(&self, desc: &FalconUCodeDescV3) -> Result<&[Bcrt30Rsa3kSignature]> {
+    pub(crate) fn sigs(&self, desc: &FalconUCodeDesc) -> Result<&[Bcrt30Rsa3kSignature]> {
         // The signatures data follows the descriptor.
-        let sigs_data_offset = self.falcon_ucode_offset + core::mem::size_of::<FalconUCodeDescV3>();
+        let hdr_size = match desc {
+            FalconUCodeDesc::V2(_v2) => core::mem::size_of::<FalconUCodeDescV2>(),
+            FalconUCodeDesc::V3(_v3) => core::mem::size_of::<FalconUCodeDescV3>(),
+        };
+        let sigs_data_offset = self.falcon_ucode_offset + hdr_size;
         let sigs_size =
-            desc.signature_count as usize * core::mem::size_of::<Bcrt30Rsa3kSignature>();
+            desc.signature_count() as usize * core::mem::size_of::<Bcrt30Rsa3kSignature>();
 
         // Make sure the data is within bounds.
         if sigs_data_offset + sigs_size > self.base.data.len() {
@@ -1113,7 +1135,7 @@ impl FwSecBiosImage {
                     .as_ptr()
                     .add(sigs_data_offset)
                     .cast::<Bcrt30Rsa3kSignature>(),
-                desc.signature_count as usize,
+                desc.signature_count() as usize,
             )
         })
     }
