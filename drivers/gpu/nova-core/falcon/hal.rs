@@ -7,6 +7,7 @@ use crate::falcon::{Falcon, FalconBromParams, FalconEngine};
 use crate::gpu::Chipset;
 
 mod ga102;
+mod tu102;
 
 /// Hardware Abstraction Layer for Falcon cores.
 ///
@@ -55,8 +56,7 @@ pub(super) fn falcon_hal<E: FalconEngine + 'static>(
             KBox::new(ga102::Ga102::<E>::new(), GFP_KERNEL)? as KBox<dyn FalconHal<E>>
         }
         Architecture::Turing => {
-            // TODO: Add Turing falcon HAL support
-            return Err(ENOTSUPP);
+            KBox::new(tu102::Tu102::<E>::new(), GFP_KERNEL)? as KBox<dyn FalconHal<E>>
         }
     };
 
