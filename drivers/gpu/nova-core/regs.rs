@@ -25,21 +25,21 @@ register!(NV_PMC_BOOT_0 @ 0x00000000, "Basic revision information about the GPU"
 });
 
 impl NV_PMC_BOOT_0 {
-    /// Combines `architecture_0` and `architecture_1` to obtain the architecture of the chip.
-    pub(crate) fn architecture(self) -> Result<Architecture> {
-        Architecture::try_from(
-            self.architecture_0() | (self.architecture_1() << Self::ARCHITECTURE_0_RANGE.len()),
-        )
+    /// Returns the architecture of the GPU. Examples: Turing, Ampere, Ada, Hopper, Blackwell.
+    pub(crate) fn architecture(chipset_value: u32) -> u8 {
+        (chipset_value >> Self::IMPLEMENTATION_RANGE.len()) as u8
     }
 
-    /// Combines `architecture` and `implementation` to obtain a code unique to the chipset.
+    /// "chipset" is a unique identifier for the GPU. Examples: GA100, GA102, GA103, GA104, GB202.
     pub(crate) fn chipset(self) -> Result<Chipset> {
-        self.architecture()
-            .map(|arch| {
-                ((arch as u32) << Self::IMPLEMENTATION_RANGE.len())
-                    | u32::from(self.implementation())
-            })
-            .and_then(Chipset::try_from)
+        let arch_bits =
+            self.architecture_0() | (self.architecture_1() << Self::ARCHITECTURE_0_RANGE.len());
+
+        // Combine with implementation to form chipset value
+        let chipset_value =
+            (arch_bits as u32) << Self::IMPLEMENTATION_RANGE.len() | self.implementation() as u32;
+
+        Chipset::try_from(chipset_value)
     }
 }
 
