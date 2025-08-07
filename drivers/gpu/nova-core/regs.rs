@@ -11,7 +11,7 @@ use crate::falcon::{
     DmaTrfCmdSize, FalconCoreRev, FalconCoreRevSubversion, FalconFbifMemType, FalconFbifTarget,
     FalconModSelAlgo, FalconSecurityModel, PFalcon2Base, PFalconBase, PeregrineCoreSelect,
 };
-use crate::gpu::{Architecture, Chipset};
+use crate::gpu::Chipset;
 use kernel::prelude::*;
 
 // PMC
@@ -26,6 +26,7 @@ register!(NV_PMC_BOOT_0 @ 0x00000000, "Basic revision information about the GPU"
 
 impl NV_PMC_BOOT_0 {
     /// Returns the architecture of the GPU. Examples: Turing, Ampere, Ada, Hopper, Blackwell.
+    #[expect(dead_code)]
     pub(crate) fn architecture(chipset_value: u32) -> u8 {
         (chipset_value >> Self::IMPLEMENTATION_RANGE.len()) as u8
     }
