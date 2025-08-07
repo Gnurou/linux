@@ -31,6 +31,10 @@ pub(crate) trait FalconHal<E: FalconEngine>: Send + Sync {
 
     /// Program the boot ROM registers prior to starting a secure firmware.
     fn program_brom(&self, falcon: &Falcon<E>, bar: &Bar0, params: &FalconBromParams) -> Result;
+
+    /// Check if the RISC-V core is active.
+    /// Returns `true` if the RISC-V core is active, `false` otherwise.
+    fn is_riscv_active(&self, bar: &Bar0) -> bool;
 }
 
 /// Returns a boxed falcon HAL adequate for `chipset`.
