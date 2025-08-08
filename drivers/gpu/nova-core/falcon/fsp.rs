@@ -103,4 +103,91 @@ impl Falcon<Fsp> {
 
         Ok(())
     }
+
+    /// Poll FSP for incoming data.
+    ///
+    /// Returns the size of available data in bytes, or 0 if no data is available.
+    #[allow(dead_code)]
+    pub(crate) fn poll_msgq(&self, bar: &Bar0) -> u32 {
+        let head = regs::NV_PFSP_MSGQ_HEAD::read(bar).address();
+        let tail = regs::NV_PFSP_MSGQ_TAIL::read(bar).address();
+
+        if head == tail {
+            return 0;
+        }
+
+        // Ensure tail >= head (no wraparound in this simple implementation)
+        if tail < head {
+            return 0;
+        }
+
+        // TAIL points at last DWORD written, so add 4 to get total size
+        tail.saturating_sub(head).saturating_add(4)
+    }
+
+    /// Send message to FSP.
+    ///
+    /// Writes a message to FSP EMEM and updates queue pointers to notify FSP.
+    ///
+    /// # Arguments
+    /// * `bar` - BAR0 memory mapping
+    /// * `packet` - Message data (must be 4-byte aligned)
+    ///
+    /// # Returns
+    /// `Ok(())` on success, `Err(EINVAL)` if packet size is invalid
+    #[allow(dead_code)]
+    pub(crate) fn send_msg(&self, bar: &Bar0, packet: &[u8]) -> Result {
+        let packet_size = packet.len();
+
+        if packet_size == 0 || packet_size % 4 != 0 {
+            return Err(EINVAL);
+        }
+
+        // Write message to EMEM at offset 0
+        self.write_emem(bar, 0, packet)?;
+
+        // Update queue pointers - TAIL points at last DWORD written
+        regs::NV_PFSP_QUEUE_TAIL::default()
+            .set_address((packet_size - 4) as u32)
+            .write(bar);
+        regs::NV_PFSP_QUEUE_HEAD::default()
+            .set_address(0)
+            .write(bar);
+
+        Ok(())
+    }
+
+    /// Receive message from FSP.
+    ///
+    /// Reads a message from FSP EMEM and resets queue pointers.
+    ///
+    /// # Arguments
+    /// * `bar` - BAR0 memory mapping
+    /// * `buffer` - Buffer to receive message data
+    /// * `packet_size` - Size of message to read (from poll_msgq)
+    ///
+    /// # Returns
+    /// `Ok(bytes_read)` on success
+    #[allow(dead_code)]
+    pub(crate) fn recv_msg(
+        &self,
+        bar: &Bar0,
+        buffer: &mut [u8],
+        packet_size: u32,
+    ) -> Result<usize> {
+        let packet_size = packet_size as usize;
+
+        if packet_size == 0 || packet_size % 4 != 0 || packet_size > buffer.len() {
+            return Err(EINVAL);
+        }
+
+        // Read response from EMEM at offset 0
+        self.read_emem(bar, 0, &mut buffer[..packet_size])?;
+
+        // Reset message queue pointers after reading
+        regs::NV_PFSP_MSGQ_TAIL::default().set_address(0).write(bar);
+        regs::NV_PFSP_MSGQ_HEAD::default().set_address(0).write(bar);
+
+        Ok(packet_size)
+    }
 }
