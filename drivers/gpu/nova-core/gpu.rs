@@ -135,7 +135,7 @@ impl fmt::Display for Chipset {
 }
 
 /// Enum representation of the GPU generation.
-#[derive(fmt::Debug)]
+#[derive(fmt::Debug, Clone, Copy)]
 pub(crate) enum Architecture {
     Turing = 0x16,
     Ampere = 0x17,
