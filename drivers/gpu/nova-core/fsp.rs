@@ -399,7 +399,9 @@ impl Fsp {
 
         dev_dbg!(
             dev,
-            "FMC Boot Params (addr={:#x}):\n  target={}\n  desc_size={:#x}\n  desc_offset={:#x}\n  rm_target={}\n  boot_args_offset={:#x} (libos_addr passed in: {:#x})\n",
+            "FMC Boot Params (addr={:#x}):\n  target={}\n  desc_size={:#x}\n  \
+             desc_offset={:#x}\n  rm_target={}\n  boot_args_offset={:#x} \
+             (libos_addr passed in: {:#x})\n",
             fmc_boot_params.dma_handle(),
             GSP_DMA_TARGET_COHERENT_SYSTEM,
             wpr_meta_size,
@@ -491,7 +493,8 @@ impl Fsp {
 
         dev_dbg!(
             dev,
-            "FSP COT Message:\n  size={} bytes\n  fmc_addr={:#x}\n  boot_params={:#x}\n  frts_offset={:#x}\n  frts_size={:#x}\n",
+            "FSP COT Message:\n  size={} bytes\n  fmc_addr={:#x}\n  boot_params={:#x}\n  \
+             frts_offset={:#x}\n  frts_size={:#x}\n",
             msg_bytes.len(),
             fmc_addr,
             fmc_boot_params_addr,
