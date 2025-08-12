@@ -443,7 +443,7 @@ impl Fsp {
         // FSP calculates FRTS location as: FB_END - frts_offset = FRTS_location
         let frts_offset = if !resume {
             let mut final_rsvd_size = if chipset.needs_large_reserved_mem() {
-                0x220000 // heap_size_non_wpr for Hopper/Blackwell+
+                crate::fb::calc_non_wpr_heap_size(chipset) // Use unified calculation
             } else {
                 rsvd_size
             };

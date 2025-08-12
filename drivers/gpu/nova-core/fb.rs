@@ -83,6 +83,16 @@ impl SysmemFlush {
     }
 }
 
+/// Calculate non-WPR heap size based on chipset architecture.
+/// This matches the logic used in FSP for consistency.
+pub(crate) fn calc_non_wpr_heap_size(chipset: Chipset) -> u64 {
+    if chipset.needs_large_reserved_mem() {
+        0x220000 // ~2.1MB for Hopper/Blackwell+
+    } else {
+        SZ_1M as u64 // 1MB for older architectures
+    }
+}
+
 /// Layout of the GPU framebuffer memory.
 ///
 /// Contains ranges of GPU memory reserved for a given purpose during the GSP boot process.
@@ -221,9 +231,8 @@ impl FbLayout {
         };
 
         let heap = {
-            const HEAP_SIZE: u64 = SZ_1M as u64;
-
-            wpr2.start - HEAP_SIZE..wpr2.start
+            let heap_size = calc_non_wpr_heap_size(chipset);
+            wpr2.start - heap_size..wpr2.start
         };
 
         // Calculate rsvd_size
