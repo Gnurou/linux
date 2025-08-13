@@ -3,8 +3,8 @@
 use kernel::{
     auxiliary, c_str,
     device::Core,
-    pci,
-    pci::{Class, ClassMask, Vendor},
+    dma::{Device, DmaMask},
+    pci::{self, Class, ClassMask, Vendor},
     prelude::*,
     sizes::SZ_16M,
     sync::Arc,
@@ -56,6 +56,9 @@ impl pci::Driver for NovaCore {
 
         pdev.enable_device_mem()?;
         pdev.set_master();
+
+        // SAFETY: No DMA allocations have been made yet
+        unsafe { pdev.dma_set_mask_and_coherent(DmaMask::new::<48>())? };
 
         let devres_bar = Arc::pin_init(
             pdev.iomap_region_sized::<BAR0_SIZE>(0, c_str!("nova-core/bar0")),
