@@ -148,7 +148,7 @@ pub(crate) struct GspCmdq {
     msg_count: u32,
     seq: u32,
     gsp_mem: CoherentAllocation<GspMem>,
-    pub _nr_ptes: u32,
+    pub nr_ptes: u32,
 }
 
 // A reference to a message currently sitting in the GSP command queue. May
@@ -275,7 +275,7 @@ impl GspCmdq {
             msg_count: MSG_COUNT,
             seq: 0,
             gsp_mem,
-            _nr_ptes: nr_ptes as u32,
+            nr_ptes: nr_ptes as u32,
         })
     }
 
@@ -617,6 +617,15 @@ impl GspCmdq {
         };
 
         Ok(gspq_msg)
+    }
+
+    pub(crate) fn get_cmdq_offsets(&self) -> (u64, u64, u64) {
+        (
+            self.gsp_mem.dma_handle(),
+            core::mem::offset_of!(Msgq, msgq) as u64,
+            (core::mem::offset_of!(GspMem, gspq) - core::mem::offset_of!(GspMem, cpuq)
+                + core::mem::offset_of!(Msgq, msgq)) as u64,
+        )
     }
 
     fn ack_msg(&mut self, length: u32) -> Result {
