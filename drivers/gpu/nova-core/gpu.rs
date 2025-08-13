@@ -313,7 +313,7 @@ impl Gpu {
 
         Self::run_fwsec_frts(pdev.as_ref(), &gsp_falcon, bar, &bios, &fb_layout)?;
 
-        let libos = gsp::GspMemObjects::new(pdev, &fw, &fb_layout)?;
+        let libos = gsp::GspMemObjects::new(pdev, bar, &fw, &fb_layout)?;
         let _libos_handle = libos.libos_dma_handle();
         let _wpr_handle = libos.wpr_meta.dma_handle();
 

@@ -214,7 +214,6 @@ type GspQueueCommandData<'a, M> = (
 );
 
 impl<'a> GspQueueCommand<'a> {
-    #[expect(unused)]
     pub(crate) fn try_as<'b, M: GspCommandToGsp>(&'b mut self) -> GspQueueCommandData<'b, M> {
         // SAFETY: The slice references the cmdq message memory which is
         // guaranteed to outlive the returned GspQueueCommandData by the
@@ -233,7 +232,6 @@ impl<'a> GspQueueCommand<'a> {
         (msg, sbuf)
     }
 
-    #[expect(unused)]
     pub(crate) fn send_to_gsp(self, bar: &Bar0) -> Result {
         self.cmdq.wait_for_free_cmd_to_gsp(
             Delta::from_secs(GSP_COMMAND_TIMEOUT),
@@ -347,7 +345,6 @@ impl GspCmdq {
         })
     }
 
-    #[expect(unused)]
     pub(crate) fn alloc_gsp_queue_command<'a>(
         &'a mut self,
         cmd_size: usize,
