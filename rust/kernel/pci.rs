@@ -23,6 +23,10 @@ use core::{
 };
 use kernel::prelude::*;
 
+mod id;
+
+pub use self::id::{Class, ClassMask};
+
 /// An adapter for the registration of PCI drivers.
 pub struct Adapter<T: Driver>(T);
 
@@ -445,6 +449,12 @@ impl Device {
         // - `bar` is a valid bar number, as guaranteed by the above call to `Bar::index_is_valid`,
         // - by its type invariant `self.as_raw` is always a valid pointer to a `struct pci_dev`.
         Ok(unsafe { bindings::pci_resource_len(self.as_raw(), bar.try_into()?) })
+    }
+
+    /// Returns the PCI class as a `Class` struct.
+    pub fn pci_class(&self) -> Class {
+        // SAFETY: `self.as_raw` is a valid pointer to a `struct pci_dev`.
+        Class::new(unsafe { (*self.as_raw()).class })
     }
 }
 
