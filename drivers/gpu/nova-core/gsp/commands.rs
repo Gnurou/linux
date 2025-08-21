@@ -260,7 +260,7 @@ pub(crate) fn set_system_info(
         info.pciConfigMirrorBase = 0x088000;
         info.pciConfigMirrorSize = 0x001000;
 
-        info.PCIDeviceID = (u32::from(dev.device_id()) << 16) | u32::from(dev.vendor_id());
+        info.PCIDeviceID = (u32::from(dev.device_id()) << 16) | pci::Vendor::NVIDIA.as_raw();
         info.PCISubDeviceID =
             (u32::from(dev.subsystem_device_id()) << 16) | u32::from(dev.subsystem_vendor_id());
         info.PCIRevisionID = u32::from(dev.revision_id());

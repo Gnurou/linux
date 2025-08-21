@@ -124,9 +124,8 @@ impl TryFrom<u32> for ClassMask {
 /// ```
 /// # use kernel::{device::Core, pci::{self, Vendor}, prelude::*};
 /// fn log_device_info(pdev: &pci::Device<Core>) -> Result<()> {
-///     // Get the raw PCI vendor ID and convert to Vendor
-///     let vendor_id = pdev.vendor_id();
-///     let vendor = Vendor::new(vendor_id.into());
+///     // Get the validated PCI vendor ID
+///     let vendor = pdev.vendor_id();
 ///     dev_info!(
 ///         pdev.as_ref(),
 ///         "Device: Vendor={}, Device=0x{:x}\n",
