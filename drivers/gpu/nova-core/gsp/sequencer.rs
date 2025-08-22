@@ -296,7 +296,7 @@ impl GspSeqCmdRunner for GspSeqCmd {
 
                 // Write the OS version to the GSP falcon.
                 seq.gsp_falcon
-                    .write_os_version(seq.bar, seq.fw.gsp_desc.app_version())?;
+                    .write_os_version(seq.bar, seq.fw.bootloader.app_version)?;
 
                 // Check if the RISC-V core is active, return error if not
                 if !seq.gsp_falcon.is_riscv_active(seq.bar)? {
