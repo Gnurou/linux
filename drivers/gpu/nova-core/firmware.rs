@@ -330,12 +330,6 @@ impl<'a> BinFirmware<'a> {
     }
 }
 
-impl RmRiscvUCodeDesc {
-    pub(crate) fn app_version(&self) -> u32 {
-        self.app_version
-    }
-}
-
 pub(crate) struct ModInfoBuilder<const N: usize>(firmware::ModInfoBuilder<N>);
 
 impl<const N: usize> ModInfoBuilder<N> {
