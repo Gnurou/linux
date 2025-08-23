@@ -103,6 +103,7 @@ pub(crate) struct FbLayout {
     pub(crate) wpr2: Range<u64>,
     pub(crate) heap: Range<u64>,
     pub(crate) vf_partition_count: u8,
+    /// Total reserved size (heap + PMU reserved), aligned to 2MB
     pub(crate) rsvd_size: u32,
 }
 
