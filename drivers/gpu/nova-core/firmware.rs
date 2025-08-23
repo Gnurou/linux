@@ -23,6 +23,216 @@ pub(crate) mod riscv;
 
 pub(crate) const FIRMWARE_VERSION: &str = "570.144";
 
+#[expect(unused)]
+pub(crate) fn elf_section<'a, 'b>(elf: &'a [u8], section_name: &'b str) -> Option<&'a [u8]> {
+    // Check ELF magic
+    if elf.len() < 5 || &elf[0..4] != b"\x7fELF" {
+        return None;
+    }
+
+    let class = elf[4];
+    match class {
+        1 => {
+            // ELF32
+            elf::elf32_section(elf, section_name)
+        }
+        2 => {
+            // ELF64
+            elf::elf64_section(elf, section_name)
+        }
+        _ => None,
+    }
+}
+
+/// Ad-hoc and temporary module to extract sections from ELF images.
+///
+/// Some firmware images are currently packaged as ELF files, where sections names are used as keys
+/// to specific and related bits of data. Future firmware versions are scheduled to move away from
+/// that scheme before nova-core becomes stable, which means this module will eventually be
+/// removed.
+mod elf {
+    use core::mem::{align_of, size_of};
+    use kernel::bindings;
+    use kernel::str::CStr;
+    use kernel::transmute::FromBytes;
+
+    /// Newtype to provide a [`FromBytes`] implementation.
+    #[repr(transparent)]
+    struct Elf32Hdr(bindings::elf32_hdr);
+
+    // SAFETY: all bit patterns are valid for this type, and it doesn't use interior mutability.
+    unsafe impl FromBytes for Elf32Hdr {}
+
+    /// Newtype to provide a [`FromBytes`] implementation.
+    #[repr(transparent)]
+    struct Elf64Hdr(bindings::elf64_hdr);
+
+    // SAFETY: all bit patterns are valid for this type, and it doesn't use interior mutability.
+    unsafe impl FromBytes for Elf64Hdr {}
+
+    /// Minimal trait to abstract over ELF header differences.
+    trait ElfHeader {
+        fn shnum(&self) -> u16;
+        fn shoff(&self) -> u64;
+        fn shstrndx(&self) -> u16;
+    }
+
+    impl ElfHeader for bindings::elf32_hdr {
+        fn shnum(&self) -> u16 {
+            self.e_shnum
+        }
+
+        fn shoff(&self) -> u64 {
+            u64::from(self.e_shoff)
+        }
+
+        fn shstrndx(&self) -> u16 {
+            self.e_shstrndx
+        }
+    }
+
+    impl ElfHeader for bindings::elf64_hdr {
+        fn shnum(&self) -> u16 {
+            self.e_shnum
+        }
+
+        fn shoff(&self) -> u64 {
+            self.e_shoff
+        }
+
+        fn shstrndx(&self) -> u16 {
+            self.e_shstrndx
+        }
+    }
+
+    /// Minimal trait to abstract over ELF section header differences.
+    trait ElfSectionHeader {
+        fn name(&self) -> u32;
+        fn offset(&self) -> u64;
+        fn size(&self) -> u64;
+    }
+
+    impl ElfSectionHeader for bindings::elf32_shdr {
+        fn name(&self) -> u32 {
+            self.sh_name
+        }
+
+        fn offset(&self) -> u64 {
+            u64::from(self.sh_offset)
+        }
+
+        fn size(&self) -> u64 {
+            u64::from(self.sh_size)
+        }
+    }
+
+    impl ElfSectionHeader for bindings::elf64_shdr {
+        fn name(&self) -> u32 {
+            self.sh_name
+        }
+
+        fn offset(&self) -> u64 {
+            self.sh_offset
+        }
+
+        fn size(&self) -> u64 {
+            self.sh_size
+        }
+    }
+
+    /// Generic implementation for extracting a section from an ELF image.
+    fn elf_section_generic<'a, H, S>(
+        elf: &'a [u8],
+        name: &str,
+        header_size: usize,
+        shdr_size: usize,
+        parse_header: impl Fn(&[u8]) -> Option<&H>,
+    ) -> Option<&'a [u8]>
+    where
+        H: ElfHeader,
+        S: ElfSectionHeader,
+    {
+        let hdr = parse_header(elf.get(0..header_size)?)?;
+
+        let shdr_num = usize::from(hdr.shnum());
+        let shdr_start = usize::try_from(hdr.shoff()).ok()?;
+        let shdr_end = shdr_num
+            .checked_mul(shdr_size)
+            .and_then(|v| v.checked_add(shdr_start))?;
+
+        // Get all the section headers.
+        let shdr = elf
+            .get(shdr_start..shdr_end)
+            .map(|slice| slice.as_ptr())
+            .filter(|ptr| ptr.align_offset(align_of::<S>()) == 0)
+            // `FromBytes::from_bytes` does not support slices yet, so build it manually.
+            //
+            // SAFETY:
+            // * `get` guarantees that the slice is within the bounds of `elf` and of size
+            //   `shdr_size * shdr_num`.
+            // * We checked that `ptr` had the correct alignment for `S`.
+            .map(|ptr| unsafe { core::slice::from_raw_parts(ptr.cast::<S>(), shdr_num) })?;
+
+        // Get the strings table.
+        let strhdr = shdr.get(usize::from(hdr.shstrndx()))?;
+
+        // Find the section which name matches `name` and return it.
+        shdr.iter()
+            .find(|sh| {
+                let Some(name_idx) = strhdr
+                    .offset()
+                    .checked_add(u64::from(sh.name()))
+                    .and_then(|idx| usize::try_from(idx).ok())
+                else {
+                    return false;
+                };
+
+                // Get the start of the name.
+                elf.get(name_idx..)
+                    // Stop at the first `0`.
+                    .and_then(|nstr| nstr.get(0..=nstr.iter().position(|b| *b == 0)?))
+                    // Convert into CStr. This should never fail because of the line above.
+                    .and_then(|nstr| CStr::from_bytes_with_nul(nstr).ok())
+                    // Convert into str.
+                    .and_then(|c_str| c_str.to_str().ok())
+                    // Check that the name matches.
+                    .map(|str| str == name)
+                    .unwrap_or(false)
+            })
+            // Return the slice containing the section.
+            .and_then(|sh| {
+                let start = usize::try_from(sh.offset()).ok()?;
+                let end = usize::try_from(sh.size())
+                    .ok()
+                    .and_then(|sh_size| start.checked_add(sh_size))?;
+
+                elf.get(start..end)
+            })
+    }
+
+    /// Tries to extract section with name `name` from the ELF32 image `elf`, and returns it.
+    pub(super) fn elf32_section<'a, 'b>(elf: &'a [u8], name: &'b str) -> Option<&'a [u8]> {
+        elf_section_generic::<bindings::elf32_hdr, bindings::elf32_shdr>(
+            elf,
+            name,
+            size_of::<bindings::elf32_hdr>(),
+            size_of::<bindings::elf32_shdr>(),
+            |data| Elf32Hdr::from_bytes(data).map(|h| &h.0),
+        )
+    }
+
+    /// Tries to extract section with name `name` from the ELF64 image `elf`, and returns it.
+    pub(super) fn elf64_section<'a, 'b>(elf: &'a [u8], name: &'b str) -> Option<&'a [u8]> {
+        elf_section_generic::<bindings::elf64_hdr, bindings::elf64_shdr>(
+            elf,
+            name,
+            size_of::<bindings::elf64_hdr>(),
+            size_of::<bindings::elf64_shdr>(),
+            |data| Elf64Hdr::from_bytes(data).map(|h| &h.0),
+        )
+    }
+}
+
 /// Requests the GPU firmware `name` suitable for `chipset`, with version `ver`.
 fn request_firmware(
     dev: &device::Device,
@@ -138,7 +348,6 @@ impl FalconUCodeDesc {
             FalconUCodeDesc::V3(v3) => v3.interface_offset,
         }
     }
-
 
     pub(crate) fn dmem_load_size(&self) -> u32 {
         match self {
