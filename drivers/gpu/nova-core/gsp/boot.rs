@@ -13,16 +13,22 @@ use kernel::time::Delta;
 
 use crate::debugfs::NovaDebugfs;
 use crate::driver::Bar0;
+use crate::falcon::fsp::Fsp as FspEngine;
+use crate::falcon::FalconEngine;
 use crate::falcon::{gsp::Gsp, sec2::Sec2, Falcon};
 use crate::fb::FbLayout;
+use crate::firmware::fsp::FspFirmware;
 use crate::firmware::{
     booter::{BooterFirmware, BooterKind},
     fwsec::{FwsecCommand, FwsecFirmware},
     gsp::GspFirmware,
     FIRMWARE_VERSION,
 };
+use crate::fsp::Fsp;
+use crate::gpu::Architecture;
 use crate::gpu::Chipset;
 use crate::gsp::commands::{build_registry, get_gsp_info, gsp_init_done, set_system_info};
+use crate::gsp::fw::LibosMemoryRegionInitArgument;
 use crate::gsp::{sequencer::GspSequencer, GspFwWprMeta};
 use crate::regs;
 use crate::util;
@@ -141,6 +147,62 @@ impl super::Gsp {
         }
     }
 
+    fn run_fsp(
+        dev: &device::Device<device::Bound>,
+        bar: &Bar0,
+        chipset: Chipset,
+        gsp_falcon: &Falcon<Gsp>,
+        wpr_meta: &CoherentAllocation<GspFwWprMeta>,
+        libos: &CoherentAllocation<LibosMemoryRegionInitArgument>,
+        fb_layout: &FbLayout,
+    ) -> Result {
+        let fsp_falcon = Falcon::<FspEngine>::new(dev, chipset)?;
+
+        Fsp::wait_secure_boot(dev, bar, chipset.arch())?;
+
+        let fsp_fw = FspFirmware::new(dev, chipset, FIRMWARE_VERSION)?;
+
+        let fmc_full_data = unsafe {
+            core::slice::from_raw_parts(fsp_fw.fmc_full.start_ptr(), fsp_fw.fmc_full.size())
+        };
+        let signatures = Fsp::extract_fmc_signatures_static(dev, fmc_full_data)?;
+
+        // Create FMC boot parameters
+        let fmc_boot_params = Fsp::create_fmc_boot_params(
+            dev,
+            wpr_meta.dma_handle(),
+            core::mem::size_of::<GspFwWprMeta>() as u32,
+            libos.dma_handle(),
+        )?;
+
+        // Execute FSP Chain of Trust
+        // NOTE: FSP Chain of Trust handles GSP boot internally - we do NOT reset or boot GSP
+        Fsp::boot_gsp_fmc_with_signatures(
+            dev,
+            bar,
+            chipset,
+            &fsp_fw.fmc_image,
+            &fmc_boot_params,
+            fb_layout.rsvd_size as u64,
+            false, // not resuming
+            &fsp_falcon,
+            &signatures,
+        )?;
+
+        // FSP Chain of Trust completes with GSP ready - no manual GSP boot needed
+        dev_dbg!(
+            dev,
+            "FSP Chain of Trust completed - GSP boot handled by FSP\n"
+        );
+
+        // Wait for GSP lockdown to be released
+        let fmc_boot_params_addr = fmc_boot_params.dma_handle();
+        let _mbox0 =
+            Self::wait_for_gsp_lockdown_release(dev, bar, gsp_falcon, fmc_boot_params_addr)?;
+
+        Ok(())
+    }
+
     /// Attempt to boot the GSP.
     ///
     /// This is a GPU-dependent and complex procedure that involves loading firmware files from
@@ -158,8 +220,6 @@ impl super::Gsp {
     ) -> Result {
         let dev = pdev.as_ref();
 
-        let bios = Vbios::new(dev, bar)?;
-
         let gsp_fw = KBox::pin_init(
             GspFirmware::new(dev, chipset, FIRMWARE_VERSION)?,
             GFP_KERNEL,
@@ -168,7 +228,13 @@ impl super::Gsp {
         let fb_layout = FbLayout::new(chipset, bar, &gsp_fw)?;
         dev_dbg!(dev, "{:#?}\n", fb_layout);
 
-        Self::run_fwsec_frts(dev, gsp_falcon, bar, &bios, &fb_layout)?;
+        if matches!(
+            chipset.arch(),
+            Architecture::Turing | Architecture::Ampere | Architecture::Ada
+        ) {
+            let bios = Vbios::new(dev, bar)?;
+            Self::run_fwsec_frts(dev, gsp_falcon, bar, &bios, &fb_layout)?;
+        }
 
         let wpr_meta =
             CoherentAllocation::<GspFwWprMeta>::alloc_coherent(dev, 1, GFP_KERNEL | __GFP_ZERO)?;
@@ -196,7 +262,21 @@ impl super::Gsp {
             "Using SEC2 to load and run the booter_load firmware...\n"
         );
 
-        Self::run_booter(dev, bar, chipset, sec2_falcon, &wpr_meta)?;
+        match chipset.arch() {
+            Architecture::Turing | Architecture::Ampere | Architecture::Ada => {
+                Self::run_booter(dev, bar, chipset, sec2_falcon, &wpr_meta)?
+            }
+
+            Architecture::Hopper | Architecture::Blackwell => Self::run_fsp(
+                dev,
+                bar,
+                chipset,
+                gsp_falcon,
+                &wpr_meta,
+                &self.libos,
+                &fb_layout,
+            )?,
+        }
 
         gsp_falcon.write_os_version(bar, gsp_fw.bootloader.app_version);
 
@@ -215,17 +295,22 @@ impl super::Gsp {
             gsp_falcon.is_riscv_active(bar),
         );
 
-        // Create and run the GSP sequencer
-        GspSequencer::run(
-            &mut self.cmdq,
-            &gsp_fw,
-            libos_handle,
-            gsp_falcon,
-            sec2_falcon,
-            pdev.as_ref(),
-            bar,
-            Delta::from_secs(10),
-        )?;
+        if matches!(
+            chipset.arch(),
+            Architecture::Turing | Architecture::Ampere | Architecture::Ada
+        ) {
+            // Create and run the GSP sequencer
+            GspSequencer::run(
+                &mut self.cmdq,
+                &gsp_fw,
+                libos_handle,
+                gsp_falcon,
+                sec2_falcon,
+                pdev.as_ref(),
+                bar,
+                Delta::from_secs(10),
+            )?;
+        }
 
         gsp_init_done(&mut self.cmdq, Delta::from_secs(10))?;
         let info = get_gsp_info(&mut self.cmdq, bar)?;
@@ -236,6 +321,94 @@ impl super::Gsp {
         );
 
         Ok(())
+    }
+
+    /// Check if GSP lockdown has been released after FSP Chain of Trust
+    fn gsp_lockdown_released(
+        dev: &device::Device,
+        gsp_falcon: &Falcon<Gsp>,
+        bar: &Bar0,
+        fmc_boot_params_addr: u64,
+        mbox0: &mut u32,
+    ) -> bool {
+        // Read GSP falcon mailbox0
+        *mbox0 = match gsp_falcon.read_mailbox0(bar) {
+            Ok(val) => val,
+            Err(_) => return false, // Still inaccessible
+        };
+
+        // Check 1: If mbox0 has 0xbadf4100 pattern, GSP is still locked down
+        if *mbox0 != 0 && (*mbox0 & 0xffffff00) == 0xbadf4100 {
+            return false;
+        }
+
+        // Check 2: If mbox0 has a value, check if it's an error
+        if *mbox0 != 0 {
+            let mbox1 = match gsp_falcon.read_mailbox1(bar) {
+                Ok(val) => val,
+                Err(_) => return false, // Still inaccessible
+            };
+
+            let combined_addr = ((mbox1 as u64) << 32) | (*mbox0 as u64);
+            if combined_addr != fmc_boot_params_addr {
+                // Address doesn't match - GSP wrote an error code
+                // Return TRUE (lockdown released) with error
+                dev_dbg!(dev,
+                    "GSP lockdown released with error: mbox0={:#x}, combined_addr={:#x}, expected={:#x}",
+                    *mbox0, combined_addr, fmc_boot_params_addr);
+                return true;
+            }
+        }
+
+        // Check 3: Verify HWCFG2 RISCV_BR_PRIV_LOCKDOWN bit is clear
+        let hwcfg2 = regs::NV_PFALCON_FALCON_HWCFG2::read(bar, &crate::falcon::gsp::Gsp::ID);
+        !hwcfg2.riscv_br_priv_lockdown()
+    }
+
+    /// Wait for GSP lockdown to be released after FSP Chain of Trust
+    fn wait_for_gsp_lockdown_release(
+        dev: &device::Device,
+        bar: &Bar0,
+        gsp_falcon: &Falcon<Gsp>,
+        fmc_boot_params_addr: u64,
+    ) -> Result<u32> {
+        dev_dbg!(dev, "Waiting for GSP lockdown release\n");
+
+        let mut mbox0: u32 = 0;
+
+        read_poll_timeout(
+            || {
+                let released = Self::gsp_lockdown_released(
+                    dev,
+                    gsp_falcon,
+                    bar,
+                    fmc_boot_params_addr,
+                    &mut mbox0,
+                );
+
+                Ok((released, mbox0))
+            },
+            |(released, _)| *released,
+            Delta::ZERO,
+            Delta::from_millis(4000),
+        )
+        .inspect_err(|_| {
+            dev_err!(dev, "GSP lockdown release timeout\n");
+        })
+        .map(|(_, mbox0)| mbox0)
+        .and_then(|mbox0| {
+            // Check mbox0 for error after wait completion
+            if mbox0 != 0 {
+                dev_err!(dev, "GSP-FMC boot failed (mbox: {:#x})\n", mbox0);
+                Err(EIO)
+            } else {
+                dev_dbg!(
+                    dev,
+                    "GSP hardware lockdown fully released, proceeding with initialization\n"
+                );
+                Ok(mbox0)
+            }
+        })
     }
 
     /// Initialize debugfs for Nova GPU driver.
