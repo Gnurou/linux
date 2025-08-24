@@ -2,6 +2,8 @@
 
 //! Traits for transmuting types.
 
+use core::mem::size_of;
+
 /// Types for which any bit pattern is valid.
 ///
 /// Not all types are valid for all values. For example, a `bool` must be either zero or one, so
@@ -9,10 +11,74 @@
 ///
 /// It's okay for the type to have padding, as initializing those bytes has no effect.
 ///
+/// # Examples
+///
+/// ```
+/// use kernel::transmute::FromBytes;
+///
+/// fn test() -> Option<()> {
+///    let raw = [1, 2, 3, 4];
+///
+///    let result = u32::from_bytes(&raw)?;
+///
+///    #[cfg(target_endian = "little")]
+///    assert_eq!(*result, 0x4030201);
+///
+///    #[cfg(target_endian = "big")]
+///    assert_eq!(*result, 0x1020304);
+///
+///    Some(())
+/// }
+/// ```
+///
 /// # Safety
 ///
 /// All bit-patterns must be valid for this type. This type must not have interior mutability.
-pub unsafe trait FromBytes {}
+pub unsafe trait FromBytes {
+    /// Converts a slice of bytes to a reference to `Self`.
+    ///
+    /// When the reference is properly aligned and the size of slice is equal to that of `T`
+    /// and is different from zero.
+    ///
+    /// In another case, it will return `None`.
+    #[allow(clippy::incompatible_msrv)]
+    fn from_bytes(bytes: &[u8]) -> Option<&Self>
+    where
+        Self: Sized,
+    {
+        let slice_ptr = bytes.as_ptr().cast::<Self>();
+        let size = size_of::<Self>();
+        if bytes.len() == size && slice_ptr.is_aligned() {
+            // SAFETY: Checking for size and alignment ensure
+            // that the conversion to a type is valid
+            unsafe { Some(&*slice_ptr) }
+        } else {
+            None
+        }
+    }
+
+    /// Converts a mutable slice of bytes to a reference to `Self`
+    ///
+    /// When the reference is properly aligned and the size of slice
+    /// is equal to that of `T`and is different from zero.
+    ///
+    /// In another case, it will return `None`.
+    #[allow(clippy::incompatible_msrv)]
+    fn from_bytes_mut(bytes: &mut [u8]) -> Option<&mut Self>
+    where
+        Self: AsBytes + Sized,
+    {
+        let slice_ptr = bytes.as_mut_ptr().cast::<Self>();
+        let size = size_of::<Self>();
+        if bytes.len() == size && slice_ptr.is_aligned() {
+            // SAFETY: Checking for size and alignment ensure
+            // that the conversion to a type is valid
+            unsafe { Some(&mut *slice_ptr) }
+        } else {
+            None
+        }
+    }
+}
 
 macro_rules! impl_frombytes {
     ($($({$($generics:tt)*})? $t:ty, )*) => {
@@ -28,7 +94,6 @@ impl_frombytes! {
 
     // SAFETY: If all bit patterns are acceptable for individual values in an array, then all bit
     // patterns are also acceptable for arrays of that type.
-    {<T: FromBytes>} [T],
     {<T: FromBytes, const N: usize>} [T; N],
 }
 
