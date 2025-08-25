@@ -129,7 +129,7 @@ pub(crate) struct GspFirmware {
     /// Device-mapped GSP signatures matching the GPU's [`Chipset`].
     signatures: DmaObject,
     /// GSP bootloader, verifies the GSP firmware before loading and running it.
-    bootloader: RiscvFirmware,
+    pub bootloader: RiscvFirmware,
 }
 
 impl GspFirmware {
