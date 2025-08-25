@@ -5,7 +5,7 @@ struct Ga100;
 use kernel::prelude::*;
 
 use crate::driver::Bar0;
-use crate::fb::hal::FbHal;
+use crate::fb::hal::{FbHal, GspFwHeapParams};
 use crate::regs;
 
 use super::tu102::FLUSH_SYSMEM_ADDR_SHIFT;
@@ -50,6 +50,10 @@ impl FbHal for Ga100 {
 
     fn vidmem_size(&self, bar: &Bar0) -> u64 {
         super::tu102::vidmem_size_gp102(bar)
+    }
+
+    fn heap_params(&self) -> GspFwHeapParams {
+        super::tu102::heap_params_tu102()
     }
 }
 

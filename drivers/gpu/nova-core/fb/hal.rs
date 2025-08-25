@@ -3,6 +3,7 @@
 use kernel::prelude::*;
 
 use crate::driver::Bar0;
+use crate::fb::GspFwHeapParams;
 use crate::gpu::Chipset;
 
 mod ga100;
@@ -23,6 +24,9 @@ pub(crate) trait FbHal {
 
     /// Returns the VRAM size, in bytes.
     fn vidmem_size(&self, bar: &Bar0) -> u64;
+
+    /// Returns the heap memory requirements to start the GSP firmware.
+    fn heap_params(&self) -> GspFwHeapParams;
 }
 
 /// Returns the HAL corresponding to `chipset`.

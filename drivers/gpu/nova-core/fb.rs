@@ -10,7 +10,11 @@ use kernel::{dev_warn, device};
 
 use crate::dma::DmaObject;
 use crate::driver::Bar0;
+use crate::firmware::gsp::GspFirmware;
+use crate::firmware::riscv::RiscvFirmware;
 use crate::gpu::Chipset;
+use crate::gsp::GSP_HEAP_ALIGNMENT;
+use crate::nvfw::{self, LibosParams};
 use crate::regs;
 
 mod hal;
@@ -81,20 +85,80 @@ impl SysmemFlush {
     }
 }
 
+/// Heap memory requirements for the GSP firmware.
+pub(crate) struct GspFwHeapParams {
+    /// Libos parameters in effect.
+    pub libos: &'static LibosParams,
+    /// The amount of heap memory used by GSP-RM boot and initialization, up and including the
+    /// first client subdevice allocation, in bytes.
+    pub base_rm_size: u64,
+}
+
+impl GspFwHeapParams {
+    /// Returns the amount of memory (in bytes) to allocate for the WPR heap for a framebuffer size
+    /// of `fb_size` (in bytes).
+    ///
+    /// Returns `EOVERFLOW` if the computation overflows.
+    pub(crate) fn wpr_heap_size(&self, fb_size: u64) -> Result<u64> {
+        let fb_size_gb = fb_size.div_ceil(SZ_1G as u64);
+
+        // The WPR heap will contain the following:
+        let size =
+            // LIBOS carveout,
+            self.libos.carveout_size
+            // RM boot working memory,
+            + self.base_rm_size
+            // One RM client,
+            + u64::from(nvfw::GSP_FW_HEAP_PARAM_CLIENT_ALLOC_SIZE)
+                .align_up(GSP_HEAP_ALIGNMENT)
+                .ok_or(EOVERFLOW)?
+            // Overhead for memory management.
+            + u64::from(nvfw::GSP_FW_HEAP_PARAM_SIZE_PER_GB_FB)
+                .checked_mul(fb_size_gb)
+                .and_then(|heap_size| heap_size.align_up(GSP_HEAP_ALIGNMENT))
+                .ok_or(EOVERFLOW)?;
+
+        // Clamp to the supported heap sizes.
+        Ok(size.clamp(
+            self.libos.allowed_heap_size.start,
+            self.libos.allowed_heap_size.end - 1,
+        ))
+    }
+}
+
 /// Layout of the GPU framebuffer memory.
 ///
 /// Contains ranges of GPU memory reserved for a given purpose during the GSP boot process.
 #[derive(Debug)]
 #[expect(dead_code)]
 pub(crate) struct FbLayout {
+    /// Range of the framebuffer. Starts at `0`.
     pub(crate) fb: Range<u64>,
+    /// VGA workspace, small area of reserved memory at the end of the framebuffer.
     pub(crate) vga_workspace: Range<u64>,
+    /// FRTS range.
     pub(crate) frts: Range<u64>,
+    /// Memory area containing the GSP bootloader image.
+    pub(crate) boot: Range<u64>,
+    /// Memory area containing the GSP firmware image.
+    pub(crate) elf: Range<u64>,
+    /// WPR2 heap.
+    pub(crate) wpr2_heap: Range<u64>,
+    // WPR2 region range, starting with an instance of `GspFwWprMeta`.
+    pub(crate) wpr2: Range<u64>,
+    pub(crate) heap: Range<u64>,
+    pub(crate) vf_partition_count: u8,
 }
 
 impl FbLayout {
-    /// Computes the FB layout.
-    pub(crate) fn new(chipset: Chipset, bar: &Bar0) -> Result<Self> {
+    /// Computes the FB layout for `chipset`, for running the `bl` GSP bootloader and `gsp` GSP
+    /// firmware.
+    pub(crate) fn new(
+        chipset: Chipset,
+        bar: &Bar0,
+        bl: &RiscvFirmware,
+        gsp: &GspFirmware,
+    ) -> Result<Self> {
         let hal = hal::fb_hal(chipset);
 
         let fb = {
@@ -138,10 +202,54 @@ impl FbLayout {
             frts_base..frts_base + FRTS_SIZE
         };
 
+        let boot = {
+            const BOOTLOADER_DOWN_ALIGN: Alignment = Alignment::new(SZ_4K);
+            let bootloader_size = bl.ucode.size() as u64;
+            let bootloader_base = (frts.start - bootloader_size).align_down(BOOTLOADER_DOWN_ALIGN);
+
+            bootloader_base..bootloader_base + bootloader_size
+        };
+
+        let elf = {
+            const ELF_DOWN_ALIGN: Alignment = Alignment::new(SZ_64K);
+            let elf_size = gsp.size as u64;
+            let elf_addr = (boot.start - elf_size).align_down(ELF_DOWN_ALIGN);
+
+            elf_addr..elf_addr + elf_size
+        };
+
+        let wpr2_heap = {
+            const WPR2_HEAP_DOWN_ALIGN: Alignment = Alignment::new(SZ_1M);
+            let wpr2_heap_size = hal.heap_params().wpr_heap_size(fb.end)?;
+            let wpr2_heap_addr = (elf.start - wpr2_heap_size).align_down(WPR2_HEAP_DOWN_ALIGN);
+
+            wpr2_heap_addr..(elf.start).align_down(WPR2_HEAP_DOWN_ALIGN)
+        };
+
+        let wpr2 = {
+            const WPR2_DOWN_ALIGN: Alignment = Alignment::new(SZ_1M);
+            let wpr2_addr = (wpr2_heap.start - size_of::<nvfw::GspFwWprMeta>() as u64)
+                .align_down(WPR2_DOWN_ALIGN);
+
+            wpr2_addr..frts.end
+        };
+
+        let heap = {
+            const HEAP_SIZE: u64 = SZ_1M as u64;
+
+            wpr2.start - HEAP_SIZE..wpr2.start
+        };
+
         Ok(Self {
             fb,
             vga_workspace,
             frts,
+            boot,
+            elf,
+            wpr2_heap,
+            wpr2,
+            heap,
+            vf_partition_count: 0,
         })
     }
 }
