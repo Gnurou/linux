@@ -240,7 +240,7 @@ impl super::Gsp {
             CoherentAllocation::<GspFwWprMeta>::alloc_coherent(dev, 1, GFP_KERNEL | __GFP_ZERO)?;
         dma_write!(wpr_meta[0] = GspFwWprMeta::new(&gsp_fw, &fb_layout)?)?;
 
-        set_system_info(&mut self.cmdq, pdev, bar)?;
+        set_system_info(&mut self.cmdq, pdev, bar, chipset)?;
         build_registry(&mut self.cmdq, bar)?;
 
         gsp_falcon.reset(bar)?;

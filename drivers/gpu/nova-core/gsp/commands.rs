@@ -11,6 +11,7 @@ use super::fw::commands::*;
 use super::fw::GspStaticConfigInfo_t;
 use super::fw::MsgFunction;
 use crate::driver::Bar0;
+use crate::gpu::Chipset;
 use crate::gsp::cmdq::Cmdq;
 use crate::gsp::cmdq::{CommandToGsp, CommandToGspBase, CommandToGspWithPayload, MessageFromGsp};
 use crate::gsp::GSP_PAGE_SIZE;
@@ -20,7 +21,7 @@ unsafe impl AsBytes for GspStaticConfigInfo_t {}
 unsafe impl FromBytes for GspStaticConfigInfo_t {}
 
 pub(crate) struct GspStaticConfigInfo {
-    pub gpu_name: [u8; 40],
+    pub gpu_name: [u8; 64],
 }
 
 struct GspInitDone {}
@@ -78,9 +79,10 @@ pub(crate) fn get_gsp_info(cmdq: &mut Cmdq, bar: &Bar0) -> Result<GspStaticConfi
                 .and_then(|cstr| cstr.to_str().ok())
                 .unwrap_or("invalid utf8");
 
-            let mut gpu_name = [0u8; 40];
+            let mut gpu_name = [0u8; 64];
             let bytes = gpu_name_str.as_bytes();
-            let copy_len = core::cmp::min(bytes.len(), gpu_name.len());
+            // Reserve space for null terminator
+            let copy_len = core::cmp::min(bytes.len(), gpu_name.len() - 1);
             gpu_name[..copy_len].copy_from_slice(&bytes[..copy_len]);
             gpu_name[copy_len] = b'\0';
 
@@ -184,9 +186,10 @@ pub(crate) fn set_system_info(
     cmdq: &mut Cmdq,
     dev: &pci::Device<device::Bound>,
     bar: &Bar0,
+    chipset: Chipset,
 ) -> Result {
     build_assert!(size_of::<GspSystemInfo>() < GSP_PAGE_SIZE);
-    cmdq.send_gsp_command(bar, GspSystemInfo::init(dev))?;
+    cmdq.send_gsp_command(bar, GspSystemInfo::init(dev, chipset))?;
 
     Ok(())
 }
