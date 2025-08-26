@@ -52,11 +52,11 @@ pub(crate) fn build_wpr_meta(
             revision: u64::from(fw::GSP_FW_WPR_META_REVISION),
             sysmemAddrOfRadix3Elf: fw.gsp.lvl0_dma_handle(),
             sizeOfRadix3Elf: fw.gsp.size as u64,
-            sysmemAddrOfBootloader: fw.bootloader.ucode.dma_handle(),
-            sizeOfBootloader: fw.bootloader.ucode.size() as u64,
-            bootloaderCodeOffset: u64::from(fw.bootloader.code_offset),
-            bootloaderDataOffset: u64::from(fw.bootloader.data_offset),
-            bootloaderManifestOffset: u64::from(fw.bootloader.manifest_offset),
+            sysmemAddrOfBootloader: fw.gsp_bootloader.ucode.dma_handle(),
+            sizeOfBootloader: fw.gsp_bootloader.ucode.size() as u64,
+            bootloaderCodeOffset: u64::from(fw.gsp_bootloader.code_offset),
+            bootloaderDataOffset: u64::from(fw.gsp_bootloader.data_offset),
+            bootloaderManifestOffset: u64::from(fw.gsp_bootloader.manifest_offset),
             __bindgen_anon_1: fw::GspFwWprMeta__bindgen_ty_1 {
                 __bindgen_anon_1: fw::GspFwWprMeta__bindgen_ty_1__bindgen_ty_1 {
                     sysmemAddrOfSignature: fw.gsp_sigs.dma_handle(),
