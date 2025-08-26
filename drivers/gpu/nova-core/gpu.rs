@@ -350,7 +350,7 @@ impl Gpu {
         );
 
         // Match what Nouveau does here:
-        gsp_falcon.write_os_version(&bar, fw.bootloader.app_version)?;
+        gsp_falcon.write_os_version(&bar, fw.gsp_bootloader.app_version)?;
 
         // Poll for RISC-V to become active before running sequencer
         util::wait_on(Delta::from_secs(5), || {
