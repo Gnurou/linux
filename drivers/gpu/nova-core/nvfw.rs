@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 
-mod r570_144;
+pub(crate) mod r570_144;
 
 use core::ops::Range;
 
