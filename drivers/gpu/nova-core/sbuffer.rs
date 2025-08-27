@@ -145,7 +145,6 @@ where
 }
 
 /// Provides a way to get mutable slices of data to write into.
-#[expect(unused)]
 impl<'a, I> SBuffer<I>
 where
     I: Iterator<Item = &'a mut [u8]>,

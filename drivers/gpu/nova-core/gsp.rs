@@ -4,6 +4,7 @@ mod boot;
 mod fw;
 
 pub(crate) mod cmdq;
+pub(crate) mod commands;
 
 use kernel::alloc::flags::GFP_KERNEL;
 use kernel::bindings;
@@ -15,7 +16,9 @@ use kernel::prelude::*;
 use kernel::ptr::Alignment;
 use kernel::transmute::{AsBytes, FromBytes};
 
+use crate::driver::Bar0;
 use crate::gsp::cmdq::GspCmdq;
+use crate::gsp::commands::{build_registry, set_system_info};
 
 use fw::GspArgumentsCached;
 use fw::LibosMemoryRegionInitArgument;
@@ -79,7 +82,10 @@ fn create_coherent_dma_object<A: AsBytes + FromBytes>(
 }
 
 impl Gsp {
-    pub(crate) fn new(pdev: &pci::Device<device::Bound>) -> Result<impl PinInit<Self, Error>> {
+    pub(crate) fn new(
+        pdev: &pci::Device<device::Bound>,
+        bar: &Bar0,
+    ) -> Result<impl PinInit<Self, Error>> {
         let dev = pdev.as_ref();
         let mut libos = CoherentAllocation::<LibosMemoryRegionInitArgument>::alloc_coherent(
             dev,
@@ -94,11 +100,14 @@ impl Gsp {
         create_pte_array(&mut logrm, 1);
 
         // Creates its own PTE array
-        let cmdq = GspCmdq::new(dev)?;
+        let mut cmdq = GspCmdq::new(dev)?;
         let rmargs =
             create_coherent_dma_object::<GspArgumentsCached>(dev, "RMARGS", 1, &mut libos, 3)?;
 
         dma_write!(rmargs[0] = GspArgumentsCached::new(&cmdq))?;
+
+        set_system_info(&mut cmdq, pdev, bar)?;
+        build_registry(&mut cmdq, bar)?;
 
         Ok(try_pin_init!(Self {
             libos,
