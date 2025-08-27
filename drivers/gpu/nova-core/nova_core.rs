@@ -11,6 +11,7 @@ mod gfw;
 mod gpu;
 mod gsp;
 mod regs;
+mod sbuffer;
 mod util;
 mod vbios;
 
