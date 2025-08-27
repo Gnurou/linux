@@ -33,7 +33,6 @@ pub(crate) struct SBuffer<I: Iterator> {
     slices: I,
 }
 
-#[expect(unused)]
 impl<'a, I> SBuffer<I>
 where
     I: Iterator,

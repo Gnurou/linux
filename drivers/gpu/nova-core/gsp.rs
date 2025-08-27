@@ -3,6 +3,9 @@
 mod boot;
 mod fw;
 
+pub(crate) mod cmdq;
+
+use kernel::alloc::flags::GFP_KERNEL;
 use kernel::bindings;
 use kernel::device;
 use kernel::dma::CoherentAllocation;
@@ -11,6 +14,8 @@ use kernel::pci;
 use kernel::prelude::*;
 use kernel::ptr::Alignment;
 use kernel::transmute::{AsBytes, FromBytes};
+
+use crate::gsp::cmdq::GspCmdq;
 
 use fw::LibosMemoryRegionInitArgument;
 
@@ -30,10 +35,11 @@ pub(crate) struct Gsp {
     pub loginit: CoherentAllocation<u8>,
     pub logintr: CoherentAllocation<u8>,
     pub logrm: CoherentAllocation<u8>,
+    pub cmdq: GspCmdq,
 }
 
 /// Creates a self-mapping page table for `obj` at its beginning.
-fn create_pte_array(obj: &mut CoherentAllocation<u8>) {
+fn create_pte_array<T: AsBytes + FromBytes>(obj: &mut CoherentAllocation<T>, skip: usize) {
     let num_pages = obj.size().div_ceil(GSP_PAGE_SIZE);
     let handle = obj.dma_handle();
 
@@ -45,7 +51,7 @@ fn create_pte_array(obj: &mut CoherentAllocation<u8>) {
     //  - The allocation size is at least as long as 8 * num_pages as
     //    GSP_PAGE_SIZE is larger than 8 bytes.
     let ptes = unsafe {
-        let ptr = obj.start_ptr_mut().cast::<u64>().add(1);
+        let ptr = obj.start_ptr_mut().cast::<u64>().add(skip);
         core::slice::from_raw_parts_mut(ptr, num_pages)
     };
 
@@ -79,17 +85,21 @@ impl Gsp {
             GFP_KERNEL | __GFP_ZERO,
         )?;
         let mut loginit = create_coherent_dma_object::<u8>(dev, "LOGINIT", 0x10000, &mut libos, 0)?;
-        create_pte_array(&mut loginit);
+        create_pte_array(&mut loginit, 1);
         let mut logintr = create_coherent_dma_object::<u8>(dev, "LOGINTR", 0x10000, &mut libos, 1)?;
-        create_pte_array(&mut logintr);
+        create_pte_array(&mut logintr, 1);
         let mut logrm = create_coherent_dma_object::<u8>(dev, "LOGRM", 0x10000, &mut libos, 2)?;
-        create_pte_array(&mut logrm);
+        create_pte_array(&mut logrm, 1);
+
+        // Creates its own PTE array
+        let cmdq = GspCmdq::new(dev)?;
 
         Ok(try_pin_init!(Self {
             libos,
             loginit,
             logintr,
             logrm,
+            cmdq,
         }))
     }
 
