@@ -7,8 +7,6 @@ use r570_144 as bindings;
 
 use core::ops::Range;
 
-use crate::fb::FbLayout;
-use crate::firmware::gsp::GspFirmware;
 use kernel::device;
 use kernel::dma::CoherentAllocation;
 use kernel::dma_write;
@@ -20,8 +18,11 @@ use kernel::sizes::SZ_1M;
 use kernel::transmute::AsBytes;
 use kernel::transmute::FromBytes;
 
+use crate::fb::FbLayout;
+use crate::firmware::gsp::GspFirmware;
 use crate::gpu::Chipset;
 use crate::gsp;
+use crate::gsp::cmdq::GspCmdq;
 
 /// Dummy type to group methods related to heap parameters for running the GSP firmware.
 pub(crate) struct GspFwHeapParams(());
@@ -235,5 +236,33 @@ impl GspFwWprMeta {
         )?;
 
         Ok(wpr_meta)
+    }
+}
+
+#[repr(transparent)]
+pub(crate) struct GspArgumentsCached(bindings::GSP_ARGUMENTS_CACHED);
+
+// SAFETY: Padding is explicit and will not contain uninitialized data.
+unsafe impl AsBytes for GspArgumentsCached {}
+
+// SAFETY: This struct only contains integer types for which all bit patterns
+// are valid.
+unsafe impl FromBytes for GspArgumentsCached {}
+
+impl GspArgumentsCached {
+    pub(crate) fn new(cmdq: &GspCmdq) -> Self {
+        let (shared_mem_phys_addr, cmd_queue_offset, stat_queue_offset) = cmdq.get_cmdq_offsets();
+
+        Self(bindings::GSP_ARGUMENTS_CACHED {
+            messageQueueInitArguments: bindings::MESSAGE_QUEUE_INIT_ARGUMENTS {
+                sharedMemPhysAddr: shared_mem_phys_addr,
+                pageTableEntryCount: cmdq.nr_ptes,
+                cmdQueueOffset: cmd_queue_offset,
+                statQueueOffset: stat_queue_offset,
+                ..Default::default()
+            },
+            bDmemStack: 1,
+            ..Default::default()
+        })
     }
 }

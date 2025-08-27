@@ -17,6 +17,7 @@ use kernel::transmute::{AsBytes, FromBytes};
 
 use crate::gsp::cmdq::GspCmdq;
 
+use fw::GspArgumentsCached;
 use fw::LibosMemoryRegionInitArgument;
 
 pub(crate) use fw::{GspFwWprMeta, LibosParams};
@@ -36,6 +37,7 @@ pub(crate) struct Gsp {
     pub logintr: CoherentAllocation<u8>,
     pub logrm: CoherentAllocation<u8>,
     pub cmdq: GspCmdq,
+    rmargs: CoherentAllocation<GspArgumentsCached>,
 }
 
 /// Creates a self-mapping page table for `obj` at its beginning.
@@ -93,12 +95,17 @@ impl Gsp {
 
         // Creates its own PTE array
         let cmdq = GspCmdq::new(dev)?;
+        let rmargs =
+            create_coherent_dma_object::<GspArgumentsCached>(dev, "RMARGS", 1, &mut libos, 3)?;
+
+        dma_write!(rmargs[0] = GspArgumentsCached::new(&cmdq))?;
 
         Ok(try_pin_init!(Self {
             libos,
             loginit,
             logintr,
             logrm,
+            rmargs,
             cmdq,
         }))
     }
