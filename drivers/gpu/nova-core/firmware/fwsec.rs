@@ -219,6 +219,11 @@ impl FalconLoadParams for FwsecFirmware {
         }
     }
 
+    fn nmem_load_params(&self) -> Option<FalconLoadTarget> {
+        // Only used on Turing and GA100, so return None for now
+        None
+    }
+
     fn brom_params(&self) -> FalconBromParams {
         FalconBromParams {
             pkc_data_offset: self.desc.pkc_data_offset(),

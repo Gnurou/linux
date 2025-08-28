@@ -323,6 +323,9 @@ pub(crate) trait FalconLoadParams {
     /// Returns the load parameters for `DMEM`.
     fn dmem_load_params(&self) -> FalconLoadTarget;
 
+    /// Returns the load parameters for `NMEM`, used only on Turing and GA100
+    fn nmem_load_params(&self) -> Option<FalconLoadTarget>;
+
     /// Returns the parameters to write into the BROM registers.
     fn brom_params(&self) -> FalconBromParams;
 
@@ -515,6 +518,14 @@ impl<E: FalconEngine + 'static> Falcon<E> {
 
         self.dma_wr(bar, fw, FalconMem::Imem, fw.imem_load_params(), true)?;
         self.dma_wr(bar, fw, FalconMem::Dmem, fw.dmem_load_params(), true)?;
+
+        if let Some(nmem) = fw.nmem_load_params() {
+            // This code should never actual get executed, because the NMEM
+            // section only exists on firmware used by Turing and GA100, and
+            // those platforms do not use DMA.  But we include this code for
+            // consistency.
+            self.dma_wr(bar, fw, FalconMem::Imem, nmem, false)?;
+        }
 
         self.hal.program_brom(self, bar, &fw.brom_params())?;
 
