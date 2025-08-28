@@ -329,19 +329,39 @@ impl BooterFirmware {
             }
         };
 
+        // There are two versions of Booter, one for Turing/GA100, and another for
+        // GA102+.  The extraction of the IMEM sections differs between the two
+        // versions.  Unfortunately, the file names are the same, and the headers
+        // don't indicate the versions.  The only way to differentiate is by the Chipset.
+
         Ok(Self {
-            imem_load_target: FalconLoadTarget {
-                src_start: app0.offset,
-                dst_start: 0,
-                len: app0.len,
+            imem_load_target: if chipset > Chipset::GA100 {
+                FalconLoadTarget {
+                    src_start: app0.offset,
+                    dst_start: 0,
+                    len: app0.len,
+                }
+            } else {
+                FalconLoadTarget {
+                    src_start: load_hdr.os_code_size,
+                    dst_start: app0.offset,
+                    len: app0.len,
+                }
             },
             dmem_load_target: FalconLoadTarget {
                 src_start: load_hdr.os_data_offset,
                 dst_start: 0,
                 len: load_hdr.os_data_size,
             },
-            // The NMEM segment exists only in the booter image for Turing and GA100
-            nmem_load_target: None,
+            nmem_load_target: if chipset > Chipset::GA100 {
+                None
+            } else {
+                Some(FalconLoadTarget {
+                    src_start: 0,
+                    dst_start: load_hdr.os_code_offset,
+                    len: load_hdr.os_code_size,
+                })
+            },
             brom_params,
             ucode: ucode_signed,
         })
