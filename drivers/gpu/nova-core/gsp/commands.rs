@@ -8,7 +8,8 @@ use kernel::time::Delta;
 use kernel::transmute::{AsBytes, FromBytes};
 
 use super::fw::{
-    GspSystemInfo, NV_VGPU_MSG_EVENT_GSP_INIT_DONE, NV_VGPU_MSG_FUNCTION_GSP_SET_SYSTEM_INFO,
+    GspStaticConfigInfo_t, GspSystemInfo, NV_VGPU_MSG_EVENT_GSP_INIT_DONE,
+    NV_VGPU_MSG_FUNCTION_GET_GSP_STATIC_INFO, NV_VGPU_MSG_FUNCTION_GSP_SET_SYSTEM_INFO,
     NV_VGPU_MSG_FUNCTION_SET_REGISTRY, PACKED_REGISTRY_ENTRY, PACKED_REGISTRY_TABLE,
     REGISTRY_TABLE_ENTRY_TYPE_DWORD,
 };
@@ -26,6 +27,12 @@ unsafe impl AsBytes for GspSystemInfo {}
 //         that is not a problem because they are not used outside the kernel.
 unsafe impl FromBytes for GspSystemInfo {}
 
+unsafe impl FromBytes for GspStaticConfigInfo_t {}
+
+pub(crate) struct GspStaticConfigInfo {
+    pub gpu_name: [u8; 40],
+}
+
 struct GspInitDone {}
 unsafe impl AsBytes for GspInitDone {}
 unsafe impl FromBytes for GspInitDone {}
@@ -41,6 +48,43 @@ pub(crate) fn gsp_init_done(cmdq: &mut GspCmdq, timeout: Delta) -> Result {
             Err(e) => break Err(e),
         }
     }
+}
+
+impl GspMessageFromGsp for GspStaticConfigInfo_t {
+    const FUNCTION: u32 = NV_VGPU_MSG_FUNCTION_GET_GSP_STATIC_INFO;
+}
+
+impl GspCommandToGsp for GspStaticConfigInfo_t {
+    const FUNCTION: u32 = NV_VGPU_MSG_FUNCTION_GET_GSP_STATIC_INFO;
+}
+
+pub(crate) fn get_gsp_info(cmdq: &mut GspCmdq, bar: &Bar0) -> Result<GspStaticConfigInfo> {
+    cmdq.send_gsp_command::<GspStaticConfigInfo_t>(bar, 0, |_, _| Ok(()))?;
+    cmdq.receive_msg_from_gsp::<GspStaticConfigInfo_t, GspStaticConfigInfo>(
+        Delta::from_secs(5),
+        |info, _| {
+            let gpu_name_str = info
+                .gpuNameString
+                .get(
+                    0..=info
+                        .gpuNameString
+                        .iter()
+                        .position(|&b| b == 0)
+                        .unwrap_or(info.gpuNameString.len() - 1),
+                )
+                .and_then(|bytes| CStr::from_bytes_with_nul(bytes).ok())
+                .and_then(|cstr| cstr.to_str().ok())
+                .unwrap_or("invalid utf8");
+
+            let mut gpu_name = [0u8; 40];
+            let bytes = gpu_name_str.as_bytes();
+            let copy_len = core::cmp::min(bytes.len(), gpu_name.len());
+            gpu_name[..copy_len].copy_from_slice(&bytes[..copy_len]);
+            gpu_name[copy_len] = b'\0';
+
+            Ok(GspStaticConfigInfo { gpu_name })
+        },
+    )
 }
 
 const GSP_REGISTRY_NUM_ENTRIES: usize = 2;

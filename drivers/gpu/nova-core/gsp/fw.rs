@@ -159,6 +159,8 @@ impl GspFwWprMeta {
 
 pub(crate) use r570_144::{
     rpc_run_cpu_sequencer_v17_00,
+    GspStaticConfigInfo_t,
+
     // Core GSP structures
     GspSystemInfo,
 
@@ -379,3 +381,6 @@ unsafe impl AsBytes for PACKED_REGISTRY_ENTRY {}
 
 // SAFETY: Padding is explicit and will not contain uninitialized data.
 unsafe impl AsBytes for r570_144::rpc_run_cpu_sequencer_v17_00 {}
+
+// SAFETY: Padding is explicit and will not contain uninitialized data.
+unsafe impl AsBytes for r570_144::GspStaticConfigInfo_t {}
