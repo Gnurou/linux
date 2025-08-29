@@ -15,7 +15,11 @@ use crate::firmware::{
     FIRMWARE_VERSION,
 };
 use crate::gpu::Chipset;
-use crate::gsp::{commands::gsp_init_done, sequencer::GspSequencer, GspFwWprMeta};
+use crate::gsp::{
+    commands::{get_gsp_info, gsp_init_done},
+    sequencer::GspSequencer,
+    GspFwWprMeta,
+};
 use crate::regs;
 use crate::util;
 use crate::vbios::Vbios;
@@ -190,7 +194,13 @@ impl super::Gsp {
             Delta::from_secs(10),
         )?;
 
-        gsp_init_done(self.cmdq(), Delta::from_secs(10))?;
+        gsp_init_done(self.as_mut().cmdq(), Delta::from_secs(10))?;
+        let info = get_gsp_info(self.as_mut().cmdq(), bar)?;
+        dev_info!(
+            pdev.as_ref(),
+            "GPU name: {}\n",
+            util::str_from_null_terminated(&info.gpu_name)
+        );
 
         Ok(())
     }

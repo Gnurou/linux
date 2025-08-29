@@ -108,6 +108,8 @@ impl LibosParams {
 
 pub(crate) use r570_144::{
     rpc_run_cpu_sequencer_v17_00,
+    GspStaticConfigInfo_t,
+
     // Core GSP structures
     GspSystemInfo,
 
