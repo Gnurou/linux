@@ -14,7 +14,7 @@ use kernel::transmute::{AsBytes, FromBytes};
 use crate::driver::Bar0;
 use crate::gsp::create_pte_array;
 use crate::gsp::fw::{
-    NV_VGPU_MSG_EVENT_GSP_INIT_DONE, NV_VGPU_MSG_EVENT_GSP_LOCKDOWN_NOTICE,
+    GspRpcHeader, NV_VGPU_MSG_EVENT_GSP_INIT_DONE, NV_VGPU_MSG_EVENT_GSP_LOCKDOWN_NOTICE,
     NV_VGPU_MSG_EVENT_GSP_POST_NOCAT_RECORD, NV_VGPU_MSG_EVENT_GSP_RUN_CPU_SEQUENCER,
     NV_VGPU_MSG_EVENT_MMU_FAULT_QUEUED, NV_VGPU_MSG_EVENT_OS_ERROR_LOG,
     NV_VGPU_MSG_EVENT_POST_EVENT, NV_VGPU_MSG_EVENT_RC_TRIGGERED,
@@ -46,28 +46,6 @@ pub(crate) trait GspMessageFromGsp: Sized {
 // pain because they basically end up pulling in the world (ie. definitions for
 // every rpc method). So for now the hand-coded ones are fine. They are just
 // structs so we can easily move to bindgen generated ones if/when we want to.
-
-// A GSP RPC header
-#[repr(C)]
-#[derive(Debug, Clone)]
-struct GspRpcHeader {
-    header_version: u32,
-    signature: u32,
-    length: u32,
-    function: u32,
-    rpc_result: u32,
-    rpc_result_private: u32,
-    sequence: u32,
-    cpu_rm_gfid: u32,
-}
-
-// SAFETY: These structs don't meet the no-padding requirements of AsBytes but
-//         that is not a problem because they are not used outside the kernel.
-unsafe impl AsBytes for GspRpcHeader {}
-
-// SAFETY: These structs don't meet the no-padding requirements of FromBytes but
-//         that is not a problem because they are not used outside the kernel.
-unsafe impl FromBytes for GspRpcHeader {}
 
 // A GSP message element header
 #[repr(C)]
@@ -220,7 +198,7 @@ type GspQueueMessageData<'a, M> = (&'a M, Option<SBuffer<core::array::IntoIter<&
 
 impl<'a> GspQueueMessage<'a> {
     pub(crate) fn try_as<M: GspMessageFromGsp>(&'a self) -> Result<GspQueueMessageData<'a, M>> {
-        if self.rpc_header.function != M::FUNCTION {
+        if self.rpc_header.function() != M::FUNCTION {
             return Err(ERANGE);
         }
 
@@ -230,7 +208,7 @@ impl<'a> GspQueueMessage<'a> {
         let msg = unsafe { &*(self.slice_1.as_ptr().cast::<M>()) };
         let data = &self.slice_1[size_of::<M>()..];
         let data_size =
-            self.rpc_header.length as usize - size_of::<GspRpcHeader>() - size_of::<M>();
+            self.rpc_header.length() as usize - size_of::<GspRpcHeader>() - size_of::<M>();
         let sbuf = if data_size > 0 {
             Some(SBuffer::new_reader([data, self.slice_2.unwrap_or(&[])]))
         } else {
@@ -241,7 +219,7 @@ impl<'a> GspQueueMessage<'a> {
     }
 
     pub(crate) fn ack(self) -> Result {
-        self.cmdq.ack_msg(self.rpc_header.length)?;
+        self.cmdq.ack_msg(self.rpc_header.length())?;
 
         Ok(())
     }
@@ -270,13 +248,13 @@ impl<'a> GspQueueCommand<'a> {
         let msg = unsafe { &mut *(self.slice_1.as_mut_ptr().cast::<M>()) };
         let data = &mut self.slice_1[size_of::<M>()..];
         let data_size =
-            self.rpc_header.length as usize - size_of::<GspRpcHeader>() - size_of::<M>();
+            self.rpc_header.length() as usize - size_of::<GspRpcHeader>() - size_of::<M>();
         let sbuf = if data_size > 0 {
             Some(SBuffer::new_writer([data, self.slice_2]))
         } else {
             None
         };
-        self.rpc_header.function = M::FUNCTION;
+        self.rpc_header.set_function(M::FUNCTION);
 
         (msg, sbuf)
     }
@@ -415,13 +393,7 @@ impl GspCmdq {
         };
         rpc_header_slice.fill(0);
         let rpc_header = GspRpcHeader::from_bytes_mut(rpc_header_slice).ok_or(EINVAL)?;
-        rpc_header.header_version = 0x03000000;
-        rpc_header.signature = 0x43505256;
-        rpc_header.length = (size_of::<GspRpcHeader>() + cmd_size) as u32;
-        rpc_header.rpc_result = 0xffffffff;
-        rpc_header.rpc_result_private = 0xffffffff;
-        rpc_header.sequence = 0;
-        rpc_header.cpu_rm_gfid = 0;
+        *rpc_header = GspRpcHeader::new(cmd_size as u32);
 
         // Number of bytes left before we have to wrap the buffer
         let remaining = ((self.msg_count as usize - wptr) << GSP_PAGE_SHIFT) - HEADER_SIZE;
@@ -466,9 +438,9 @@ impl GspCmdq {
             &cmd.cmdq.dev,
             "GSP RPC: send: seq# {}, function=0x{:x} ({}), length=0x{:x}\n",
             cmd.cmdq.seq - 1,
-            cmd.rpc_header.function,
-            decode_gsp_function(cmd.rpc_header.function),
-            cmd.rpc_header.length,
+            cmd.rpc_header.function(),
+            decode_gsp_function(cmd.rpc_header.function()),
+            cmd.rpc_header.length(),
         );
 
         // Calculate checksum over the entire message
@@ -514,7 +486,7 @@ impl GspCmdq {
         // Not all pages of the message have made it to the queue so bail and
         // let the caller retry. Note rpc.length includes the rpc header size
         // but not the message header size.
-        if used_pages << GSP_PAGE_SHIFT < size_of::<GspMsgHeader>() as u32 + rpc.length {
+        if used_pages << GSP_PAGE_SHIFT < size_of::<GspMsgHeader>() as u32 + rpc.length() {
             return false;
         }
 
@@ -566,22 +538,22 @@ impl GspCmdq {
         )
         .ok_or(EINVAL)?;
 
-        if rpc_header.length >= self.msg_count << GSP_PAGE_SHIFT {
+        if rpc_header.length() >= self.msg_count << GSP_PAGE_SHIFT {
             return Err(E2BIG);
         }
 
         // rpc.length includes the size of the GspRpcHeader. Remove it to make
         // the rest of the code a bit easier to follow.
-        let rpc_data_length = rpc_header.length - size_of::<GspRpcHeader>() as u32;
+        let rpc_data_length = rpc_header.length() - size_of::<GspRpcHeader>() as u32;
 
         // Log RPC receive with message type decoding
         dev_info!(
             self.dev,
             "GSP RPC: receive: seq# {}, function=0x{:x} ({}), length=0x{:x}\n",
-            rpc_header.sequence,
-            rpc_header.function,
-            decode_gsp_function(rpc_header.function),
-            rpc_header.length,
+            rpc_header.sequence(),
+            rpc_header.function(),
+            decode_gsp_function(rpc_header.function()),
+            rpc_header.length(),
         );
 
         // Should never happen if `wait_on_message()` has been called but we need to check.
@@ -621,7 +593,7 @@ impl GspCmdq {
             dev_err!(
                 self.dev,
                 "GSP RPC: receive: Call {} - bad checksum",
-                rpc_header.sequence
+                rpc_header.sequence()
             );
             return Err(EIO);
         }

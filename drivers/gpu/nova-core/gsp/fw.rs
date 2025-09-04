@@ -353,3 +353,42 @@ impl MsgqRxHeader {
         unsafe { ptr.write_volatile(val) }
     }
 }
+
+#[repr(transparent)]
+pub(crate) struct GspRpcHeader(bindings::rpc_message_header_v);
+
+unsafe impl AsBytes for GspRpcHeader {}
+
+unsafe impl FromBytes for GspRpcHeader {}
+
+impl GspRpcHeader {
+    pub(crate) fn new(cmd_size: u32) -> Self {
+        Self(bindings::rpc_message_header_v {
+            // TODO: magic number
+            header_version: 0x03000000,
+            signature: bindings::NV_VGPU_MSG_SIGNATURE_VALID,
+            // TODO: overflow check?
+            length: size_of::<Self>() as u32 + cmd_size,
+            rpc_result: 0xffffffff,
+            rpc_result_private: 0xffffffff,
+            ..Default::default()
+        })
+    }
+
+    pub(crate) fn sequence(&self) -> u32 {
+        self.0.sequence
+    }
+
+    pub(crate) fn function(&self) -> u32 {
+        self.0.function
+    }
+
+    // TODO: Hack. Should be set by constructor.
+    pub(crate) fn set_function(&mut self, function: u32) {
+        self.0.function = function;
+    }
+
+    pub(crate) fn length(&self) -> u32 {
+        self.0.length
+    }
+}
