@@ -5,11 +5,11 @@ use core::sync::atomic::{fence, Ordering};
 use kernel::alloc::flags::GFP_KERNEL;
 use kernel::device;
 use kernel::dma::CoherentAllocation;
+use kernel::dma_write;
 use kernel::prelude::*;
 use kernel::sync::aref::ARef;
 use kernel::time::Delta;
 use kernel::transmute::{AsBytes, FromBytes};
-use kernel::{dma_read, dma_write};
 
 use crate::driver::Bar0;
 use crate::gsp::create_pte_array;
@@ -89,44 +89,86 @@ unsafe impl AsBytes for GspMsgHeader {}
 //         that is not a problem because they are not used outside the kernel.
 unsafe impl FromBytes for GspMsgHeader {}
 
-// These next two structs come from msgq_priv.h. Hopefully the will never
-// need updating once the ABI is stabalised.
-#[repr(C)]
-#[derive(Debug)]
-struct MsgqTxHeader {
-    version: u32,    // queue version
-    size: u32,       // bytes, page aligned
-    msg_size: u32,   // entry size, bytes, must be power-of-2, 16 is minimum
-    msg_count: u32,  // number of entries in queue
-    write_ptr: u32,  // message id of next slot
-    flags: u32,      // if set it means "i want to swap RX"
-    rx_hdr_off: u32, // Offset of msgqRxHeader from start of backing store
-    entry_off: u32,  // Offset of entries from start of backing store
-}
-
-// SAFETY: These structs don't meet the no-padding requirements of AsBytes but
-//         that is not a problem because they are not used outside the kernel.
-unsafe impl AsBytes for MsgqTxHeader {}
-
-#[repr(C)]
-#[derive(Debug)]
-struct MsgqRxHeader {
-    read_ptr: u32, // message id of last message read
-}
-
 /// Number of GSP pages making the Msgq.
-const MSGQ_NUM_PAGES: usize = 0x3f;
+const MSGQ_NUM_PAGES: u32 = 0x3f;
 
 #[repr(C, align(0x1000))]
 #[derive(Debug)]
 struct MsgqData {
-    data: [[u8; GSP_PAGE_SIZE]; MSGQ_NUM_PAGES],
+    data: [[u8; GSP_PAGE_SIZE]; MSGQ_NUM_PAGES as usize],
 }
 
 // Annoyingly there is no real equivalent of #define so we're forced to use a
 // literal to specify the alignment above. So check that against the actual GSP
 // page size here.
 static_assert!(align_of::<MsgqData>() == GSP_PAGE_SIZE);
+
+/// TX header for setting up a command queue with the GSP.
+///
+/// # Invariants
+///
+/// [`Self::write_ptr`] is guaranteed to return a value in the range `0..NUM_PAGES`.
+#[repr(transparent)]
+#[derive(Debug)]
+struct MsgqTxHeader(super::fw::MsgqTxHeader);
+
+unsafe impl AsBytes for MsgqTxHeader {}
+
+impl MsgqTxHeader {
+    fn new(msgq_size: u32, rx_hdr_offset: u32) -> Self {
+        Self(super::fw::MsgqTxHeader::new(
+            msgq_size,
+            MSGQ_NUM_PAGES,
+            rx_hdr_offset,
+        ))
+    }
+
+    fn write_ptr(&self) -> u32 {
+        self.0.write_ptr()
+    }
+
+    /// Advance the write pointer by `elem_count` units, wrapping around the ring buffer if
+    /// necessary.
+    fn advance_write_ptr(&mut self, elem_count: u32) {
+        let wptr = self.write_ptr().wrapping_add(elem_count) % MSGQ_NUM_PAGES;
+        self.0.set_write_ptr(wptr);
+
+        // Ensure all command data is visible before triggering the GSP read
+        fence(Ordering::SeqCst);
+    }
+}
+
+/// RX header for setting up a message queue with the GSP.
+///
+/// # Invariants
+///
+/// [`Self::read_ptr`] is guaranteed to return a value in the range `0..NUM_PAGES`.
+#[repr(transparent)]
+#[derive(Debug)]
+struct MsgqRxHeader(super::fw::MsgqRxHeader);
+
+unsafe impl AsBytes for MsgqRxHeader {}
+
+impl MsgqRxHeader {
+    fn new() -> Self {
+        Self(super::fw::MsgqRxHeader::new())
+    }
+
+    fn read_ptr(&self) -> u32 {
+        self.0.read_ptr()
+    }
+
+    /// Advance the read pointer by `elem_count` units, wrapping around the ring buffer if
+    /// necessary.
+    fn advance_read_ptr(&mut self, elem_count: u32) {
+        let rptr = self.read_ptr().wrapping_add(elem_count) % MSGQ_NUM_PAGES;
+
+        // Ensure read pointer is properly ordered
+        fence(Ordering::SeqCst);
+
+        self.0.set_read_ptr(rptr);
+    }
+}
 
 // There is no struct defined for this in the open-gpu-kernel-source headers.
 // Instead it is defined by code in GspMsgQueuesInit().
@@ -256,20 +298,11 @@ impl GspCmdq {
         create_pte_array(&mut gsp_mem, 0);
 
         const MSGQ_SIZE: u32 = size_of::<Msgq>() as u32;
+        //TODO: this is equal to MSGQ_NUM_PAGES...
         const MSG_COUNT: u32 = ((MSGQ_SIZE as usize - GSP_PAGE_SIZE) / GSP_PAGE_SIZE) as u32;
         const RX_HDR_OFF: u32 = offset_of!(Msgq, rx) as u32;
-        dma_write!(
-            gsp_mem[0].cpuq.tx = MsgqTxHeader {
-                version: 0,
-                size: MSGQ_SIZE,
-                entry_off: GSP_PAGE_SIZE as u32,
-                msg_size: GSP_PAGE_SIZE as u32,
-                msg_count: MSG_COUNT,
-                write_ptr: 0,
-                flags: 1,
-                rx_hdr_off: RX_HDR_OFF,
-            }
-        )?;
+        dma_write!(gsp_mem[0].cpuq.tx = MsgqTxHeader::new(MSGQ_SIZE, RX_HDR_OFF))?;
+        dma_write!(gsp_mem[0].cpuq.rx = MsgqRxHeader::new())?;
 
         Ok(GspCmdq {
             dev: dev.into(),
@@ -283,25 +316,29 @@ impl GspCmdq {
     fn cpu_wptr(&self) -> u32 {
         // SAFETY: index `0` is valid as `gsp_mem` has been allocated accordingly, thus the access
         // cannot fail.
-        unsafe { dma_read!(self.gsp_mem[0].cpuq.tx.write_ptr).unwrap_unchecked() }
+        let gsp_mem = unsafe { &self.gsp_mem.as_slice(0, 1).unwrap_unchecked()[0] };
+        gsp_mem.cpuq.tx.write_ptr()
     }
 
     fn gsp_rptr(&self) -> u32 {
         // SAFETY: index `0` is valid as `gsp_mem` has been allocated accordingly, thus the access
         // cannot fail.
-        unsafe { dma_read!(self.gsp_mem[0].gspq.rx.read_ptr).unwrap_unchecked() }
+        let gsp_mem = unsafe { &self.gsp_mem.as_slice(0, 1).unwrap_unchecked()[0] };
+        gsp_mem.gspq.rx.read_ptr()
     }
 
     fn cpu_rptr(&self) -> u32 {
         // SAFETY: index `0` is valid as `gsp_mem` has been allocated accordingly, thus the access
         // cannot fail.
-        unsafe { dma_read!(self.gsp_mem[0].cpuq.rx.read_ptr).unwrap_unchecked() }
+        let gsp_mem = unsafe { &self.gsp_mem.as_slice(0, 1).unwrap_unchecked()[0] };
+        gsp_mem.cpuq.rx.read_ptr()
     }
 
     fn gsp_wptr(&self) -> u32 {
         // SAFETY: index `0` is valid as `gsp_mem` has been allocated accordingly, thus the access
         // cannot fail.
-        unsafe { dma_read!(self.gsp_mem[0].gspq.tx.write_ptr).unwrap_unchecked() }
+        let gsp_mem = unsafe { &self.gsp_mem.as_slice(0, 1).unwrap_unchecked()[0] };
+        gsp_mem.gspq.tx.write_ptr()
     }
 
     // Returns the numbers of pages free for sending an RPC to GSP.
@@ -442,16 +479,8 @@ impl GspCmdq {
             &cmd.slice_2[..],
         ]));
 
-        let mut wptr = cmd.cmdq.cpu_wptr();
-        wptr += cmd.msg_header.elem_count;
-        wptr %= MSGQ_NUM_PAGES as u32;
-
-        // SAFETY: index `0` is valid as `gsp_mem` has been allocated accordingly, thus the access
-        // cannot fail.
-        unsafe { dma_write!(cmd.cmdq.gsp_mem[0].cpuq.tx.write_ptr = wptr).unwrap_unchecked() };
-
-        // Ensure all command data is visible before triggering the GSP read
-        fence(Ordering::SeqCst);
+        let gsp_mem = unsafe { &mut cmd.cmdq.gsp_mem.as_slice_mut(0, 1).unwrap_unchecked()[0] };
+        gsp_mem.cpuq.tx.advance_write_ptr(cmd.msg_header.elem_count);
 
         NV_PGSP_QUEUE_HEAD::default().set_address(0).write(bar);
 
@@ -618,16 +647,9 @@ impl GspCmdq {
 
     fn ack_msg(&mut self, length: u32) -> Result {
         const HEADER_SIZE: u32 = (size_of::<GspMsgHeader>() + size_of::<GspRpcHeader>()) as u32;
-        let mut rptr = self.cpu_rptr();
-        rptr += (HEADER_SIZE + length).div_ceil(GSP_PAGE_SIZE as u32);
-        rptr %= MSGQ_NUM_PAGES as u32;
-
-        // Ensure read pointer is properly ordered
-        fence(Ordering::SeqCst);
-
-        // SAFETY: index `0` is valid as `gsp_mem` has been allocated accordingly, thus the access
-        // cannot fail.
-        unsafe { dma_write!(self.gsp_mem[0].cpuq.rx.read_ptr = rptr).unwrap_unchecked() };
+        let num_elems = (HEADER_SIZE + length).div_ceil(GSP_PAGE_SIZE as u32);
+        let gsp_mem = unsafe { &mut self.gsp_mem.as_slice_mut(0, 1).unwrap_unchecked()[0] };
+        gsp_mem.cpuq.rx.advance_read_ptr(num_elems);
 
         Ok(())
     }
