@@ -392,3 +392,46 @@ impl GspRpcHeader {
         self.0.length
     }
 }
+
+#[repr(transparent)]
+pub(crate) struct GspMsgElement(bindings::GSP_MSG_QUEUE_ELEMENT);
+
+unsafe impl AsBytes for GspMsgElement {}
+
+unsafe impl FromBytes for GspMsgElement {}
+
+impl GspMsgElement {
+    pub(crate) fn new(sequence: u32, cmd_size: usize) -> Self {
+        Self(bindings::GSP_MSG_QUEUE_ELEMENT {
+            seqNum: sequence,
+            // TODO: overflow check and fallible div?
+            elemCount: (size_of::<Self>() + cmd_size).div_ceil(GSP_PAGE_SIZE) as u32,
+            // TODO: fallible conversion.
+            rpc: GspRpcHeader::new(cmd_size as u32).0,
+            ..Default::default()
+        })
+    }
+
+    pub(crate) fn rpc_header(&self) -> &GspRpcHeader {
+        unsafe { core::mem::transmute(&self.0.rpc) }
+    }
+
+    // TODO: Hack. Remove once we can set the function of the RPC header in the constructor.
+    pub(crate) fn rpc_header_mut(&mut self) -> &mut GspRpcHeader {
+        unsafe { core::mem::transmute(&mut self.0.rpc) }
+    }
+
+    // TODO: Hack. Checksum should be automatically computed?
+    pub(crate) fn set_checksum(&mut self, checksum: u32) {
+        self.0.checkSum = checksum;
+    }
+
+    pub(crate) fn elem_count(&self) -> u32 {
+        self.0.elemCount
+    }
+
+    // Returns the total size of the message element, including its headers and payload.
+    pub(crate) fn length(&self) -> usize {
+        size_of::<Self>() + self.rpc_header().length() as usize
+    }
+}

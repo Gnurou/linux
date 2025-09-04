@@ -14,10 +14,10 @@ use kernel::transmute::{AsBytes, FromBytes};
 use crate::driver::Bar0;
 use crate::gsp::create_pte_array;
 use crate::gsp::fw::{
-    GspRpcHeader, NV_VGPU_MSG_EVENT_GSP_INIT_DONE, NV_VGPU_MSG_EVENT_GSP_LOCKDOWN_NOTICE,
-    NV_VGPU_MSG_EVENT_GSP_POST_NOCAT_RECORD, NV_VGPU_MSG_EVENT_GSP_RUN_CPU_SEQUENCER,
-    NV_VGPU_MSG_EVENT_MMU_FAULT_QUEUED, NV_VGPU_MSG_EVENT_OS_ERROR_LOG,
-    NV_VGPU_MSG_EVENT_POST_EVENT, NV_VGPU_MSG_EVENT_RC_TRIGGERED,
+    GspMsgElement, GspRpcHeader, NV_VGPU_MSG_EVENT_GSP_INIT_DONE,
+    NV_VGPU_MSG_EVENT_GSP_LOCKDOWN_NOTICE, NV_VGPU_MSG_EVENT_GSP_POST_NOCAT_RECORD,
+    NV_VGPU_MSG_EVENT_GSP_RUN_CPU_SEQUENCER, NV_VGPU_MSG_EVENT_MMU_FAULT_QUEUED,
+    NV_VGPU_MSG_EVENT_OS_ERROR_LOG, NV_VGPU_MSG_EVENT_POST_EVENT, NV_VGPU_MSG_EVENT_RC_TRIGGERED,
     NV_VGPU_MSG_EVENT_UCODE_LIBOS_PRINT, NV_VGPU_MSG_FUNCTION_ALLOC_CHANNEL_DMA,
     NV_VGPU_MSG_FUNCTION_ALLOC_CTX_DMA, NV_VGPU_MSG_FUNCTION_ALLOC_DEVICE,
     NV_VGPU_MSG_FUNCTION_ALLOC_MEMORY, NV_VGPU_MSG_FUNCTION_ALLOC_OBJECT,
@@ -40,32 +40,6 @@ pub(crate) trait GspCommandToGsp: Sized {
 pub(crate) trait GspMessageFromGsp: Sized {
     const FUNCTION: u32;
 }
-
-// This next section contains constants and structures hand-coded from the GSP
-// headers We could replace these with bindgen versions, but that's a bit of a
-// pain because they basically end up pulling in the world (ie. definitions for
-// every rpc method). So for now the hand-coded ones are fine. They are just
-// structs so we can easily move to bindgen generated ones if/when we want to.
-
-// A GSP message element header
-#[repr(C)]
-#[derive(Debug, Clone)]
-struct GspMsgHeader {
-    auth_tag_buffer: [u8; 16],
-    aad_buffer: [u8; 16],
-    checksum: u32,
-    sequence: u32,
-    elem_count: u32,
-    pad: u32,
-}
-
-// SAFETY: These structs don't meet the no-padding requirements of AsBytes but
-//         that is not a problem because they are not used outside the kernel.
-unsafe impl AsBytes for GspMsgHeader {}
-
-// SAFETY: These structs don't meet the no-padding requirements of FromBytes but
-//         that is not a problem because they are not used outside the kernel.
-unsafe impl FromBytes for GspMsgHeader {}
 
 /// Number of GSP pages making the Msgq.
 const MSGQ_NUM_PAGES: u32 = 0x3f;
@@ -229,8 +203,7 @@ impl<'a> GspQueueMessage<'a> {
 // message to the GSP.
 pub(crate) struct GspQueueCommand<'a> {
     cmdq: &'a mut GspCmdq,
-    msg_header: &'a mut GspMsgHeader,
-    rpc_header: &'a mut GspRpcHeader,
+    msg_element: &'a mut GspMsgElement,
     slice_1: &'a mut [u8],
     slice_2: &'a mut [u8],
 }
@@ -247,14 +220,15 @@ impl<'a> GspQueueCommand<'a> {
         // invariants of GspQueueCommand and the lifetime 'a.
         let msg = unsafe { &mut *(self.slice_1.as_mut_ptr().cast::<M>()) };
         let data = &mut self.slice_1[size_of::<M>()..];
-        let data_size =
-            self.rpc_header.length() as usize - size_of::<GspRpcHeader>() - size_of::<M>();
+        let data_size = self.msg_element.rpc_header().length() as usize
+            - size_of::<GspRpcHeader>()
+            - size_of::<M>();
         let sbuf = if data_size > 0 {
             Some(SBuffer::new_writer([data, self.slice_2]))
         } else {
             None
         };
-        self.rpc_header.set_function(M::FUNCTION);
+        self.msg_element.rpc_header_mut().set_function(M::FUNCTION);
 
         (msg, sbuf)
     }
@@ -357,8 +331,8 @@ impl GspCmdq {
         &'a mut self,
         cmd_size: usize,
     ) -> Result<GspQueueCommand<'a>> {
-        const HEADER_SIZE: usize = size_of::<GspMsgHeader>() + size_of::<GspRpcHeader>();
-        let msg_size = size_of::<GspMsgHeader>() + size_of::<GspRpcHeader>() + cmd_size;
+        const HEADER_SIZE: usize = size_of::<GspMsgElement>();
+        let msg_size = HEADER_SIZE + cmd_size;
         if self.free_tx_pages() < msg_size.div_ceil(GSP_PAGE_SIZE) as u32 {
             return Err(EAGAIN);
         }
@@ -371,29 +345,12 @@ impl GspCmdq {
 
         // SAFETY: ptr points to at least one GSP_PAGE_SIZE bytes of contiguous
         // memory which is larger than GspMsgHeader.
-        let msg_header_slice: &mut [u8] =
-            unsafe { core::slice::from_raw_parts_mut(ptr.cast::<u8>(), size_of::<GspMsgHeader>()) };
-        msg_header_slice.fill(0);
-        let msg_header = GspMsgHeader::from_bytes_mut(msg_header_slice).ok_or(EINVAL)?;
-        msg_header.auth_tag_buffer = [0; 16];
-        msg_header.aad_buffer = [0; 16];
-        msg_header.checksum = 0;
-        msg_header.sequence = self.seq;
-        msg_header.elem_count = (HEADER_SIZE + cmd_size).div_ceil(GSP_PAGE_SIZE) as u32;
-        msg_header.pad = 0;
-        self.seq += 1;
-
-        // SAFETY: ptr points to GSP_PAGE_SIZE bytes of memory which is larger
-        // than both GspMsgHeader and GspRpcHeader combined.
-        let rpc_header_slice: &mut [u8] = unsafe {
-            core::slice::from_raw_parts_mut(
-                ptr.cast::<u8>().add(size_of::<GspMsgHeader>()),
-                size_of::<GspRpcHeader>(),
-            )
+        let msg_element_slice: &mut [u8] = unsafe {
+            core::slice::from_raw_parts_mut(ptr.cast::<u8>(), size_of::<GspMsgElement>())
         };
-        rpc_header_slice.fill(0);
-        let rpc_header = GspRpcHeader::from_bytes_mut(rpc_header_slice).ok_or(EINVAL)?;
-        *rpc_header = GspRpcHeader::new(cmd_size as u32);
+        let msg_element = GspMsgElement::from_bytes_mut(msg_element_slice).ok_or(EINVAL)?;
+        *msg_element = GspMsgElement::new(self.seq, cmd_size);
+        self.seq += 1;
 
         // Number of bytes left before we have to wrap the buffer
         let remaining = ((self.msg_count as usize - wptr) << GSP_PAGE_SHIFT) - HEADER_SIZE;
@@ -426,33 +383,36 @@ impl GspCmdq {
 
         Ok(GspQueueCommand {
             cmdq: self,
-            msg_header,
-            rpc_header,
+            msg_element,
             slice_1,
             slice_2,
         })
     }
 
     pub(crate) fn send_cmd_to_gsp(cmd: GspQueueCommand<'_>, bar: &Bar0) -> Result {
+        let rpc_header = cmd.msg_element.rpc_header();
         dev_info!(
             &cmd.cmdq.dev,
             "GSP RPC: send: seq# {}, function=0x{:x} ({}), length=0x{:x}\n",
             cmd.cmdq.seq - 1,
-            cmd.rpc_header.function(),
-            decode_gsp_function(cmd.rpc_header.function()),
-            cmd.rpc_header.length(),
+            rpc_header.function(),
+            decode_gsp_function(rpc_header.function()),
+            rpc_header.length(),
         );
 
         // Calculate checksum over the entire message
-        cmd.msg_header.checksum = GspCmdq::calculate_checksum(SBuffer::new_reader([
-            cmd.msg_header.as_bytes(),
-            cmd.rpc_header.as_bytes(),
-            &cmd.slice_1[..],
-            &cmd.slice_2[..],
-        ]));
+        cmd.msg_element
+            .set_checksum(GspCmdq::calculate_checksum(SBuffer::new_reader([
+                cmd.msg_element.as_bytes(),
+                &cmd.slice_1[..],
+                &cmd.slice_2[..],
+            ])));
 
         let gsp_mem = unsafe { &mut cmd.cmdq.gsp_mem.as_slice_mut(0, 1).unwrap_unchecked()[0] };
-        gsp_mem.cpuq.tx.advance_write_ptr(cmd.msg_header.elem_count);
+        gsp_mem
+            .cpuq
+            .tx
+            .advance_write_ptr(cmd.msg_element.elem_count());
 
         NV_PGSP_QUEUE_HEAD::default().set_address(0).write(bar);
 
@@ -460,7 +420,7 @@ impl GspCmdq {
     }
 
     pub(crate) fn msg_from_gsp_available(&self) -> bool {
-        const HEADER_SIZE: u32 = (size_of::<GspMsgHeader>() + size_of::<GspRpcHeader>()) as u32;
+        const HEADER_SIZE: u32 = size_of::<GspMsgElement>() as u32;
 
         // Used pages contains the total number of pages available to consume
         let used_pages = self.used_rx_pages();
@@ -476,17 +436,12 @@ impl GspCmdq {
 
         // SAFETY: ptr points to at least GSP_PAGE_SIZE bytes of memory which is
         // larger than GspRpcHeader.
-        let rpc = unsafe {
-            &*(ptr
-                .cast::<u8>()
-                .add(size_of::<GspMsgHeader>())
-                .cast::<GspRpcHeader>())
-        };
+        let msg_element = unsafe { &*(ptr.cast::<u8>().cast::<GspMsgElement>()) };
 
         // Not all pages of the message have made it to the queue so bail and
         // let the caller retry. Note rpc.length includes the rpc header size
         // but not the message header size.
-        if used_pages << GSP_PAGE_SHIFT < size_of::<GspMsgHeader>() as u32 + rpc.length() {
+        if (used_pages as usize) << GSP_PAGE_SHIFT < msg_element.length() {
             return false;
         }
 
@@ -504,7 +459,7 @@ impl GspCmdq {
     }
 
     pub(crate) fn receive_msg_from_gsp<'a>(&'a mut self) -> Result<GspQueueMessage<'a>> {
-        const HEADER_SIZE: u32 = (size_of::<GspMsgHeader>() + size_of::<GspRpcHeader>()) as u32;
+        const HEADER_SIZE: u32 = size_of::<GspMsgElement>() as u32;
 
         // Used pages contains the total number of pages available to consume
         let used_pages = self.used_rx_pages();
@@ -530,13 +485,9 @@ impl GspCmdq {
         let msg_slice =
             unsafe { core::slice::from_raw_parts(ptr as *const u8, remaining as usize) };
 
-        let msg_header =
-            GspMsgHeader::from_bytes(&msg_slice[0..size_of::<GspMsgHeader>()]).ok_or(EINVAL)?;
-        let rpc_header = GspRpcHeader::from_bytes(
-            &msg_slice
-                [size_of::<GspMsgHeader>()..size_of::<GspMsgHeader>() + size_of::<GspRpcHeader>()],
-        )
-        .ok_or(EINVAL)?;
+        let msg_element =
+            GspMsgElement::from_bytes(&msg_slice[0..size_of::<GspMsgElement>()]).ok_or(EINVAL)?;
+        let rpc_header = msg_element.rpc_header();
 
         if rpc_header.length() >= self.msg_count << GSP_PAGE_SHIFT {
             return Err(E2BIG);
@@ -584,8 +535,7 @@ impl GspCmdq {
         };
 
         if GspCmdq::calculate_checksum(SBuffer::new_reader([
-            msg_header.as_bytes(),
-            rpc_header.as_bytes(),
+            msg_element.as_bytes(),
             slice_1,
             slice_2.unwrap_or(&[]),
         ])) != 0
@@ -618,7 +568,7 @@ impl GspCmdq {
     }
 
     fn ack_msg(&mut self, length: u32) -> Result {
-        const HEADER_SIZE: u32 = (size_of::<GspMsgHeader>() + size_of::<GspRpcHeader>()) as u32;
+        const HEADER_SIZE: u32 = size_of::<GspMsgElement>() as u32;
         let num_elems = (HEADER_SIZE + length).div_ceil(GSP_PAGE_SIZE as u32);
         let gsp_mem = unsafe { &mut self.gsp_mem.as_slice_mut(0, 1).unwrap_unchecked()[0] };
         gsp_mem.cpuq.rx.advance_read_ptr(num_elems);
