@@ -178,6 +178,30 @@ impl DmaGspMem {
         &mut unsafe { self.0.as_slice_mut(0, 1) }.unwrap()[0]
     }
 
+    fn driver_write_area(&mut self) -> (&mut [[u8; GSP_PAGE_SIZE]], &mut [[u8; GSP_PAGE_SIZE]]) {
+        // SAFETY: we will only access the driver-owned part of the shared memory.
+        let gsp_mem = unsafe { self.access_mut() };
+
+        let tx = gsp_mem.cpuq.tx.write_ptr() as usize;
+        let rx = gsp_mem.gspq.rx.read_ptr() as usize;
+        let (before_tx, after_tx) = gsp_mem.cpuq.msgq.data.split_at_mut(tx);
+
+        if rx <= tx {
+            // The area from `tx` up to the end of the ring, and from the beginning of the ring up
+            // to `rx`, minus one unit, belongs to the driver.
+            if rx == 0 {
+                let last = after_tx.len() - 1;
+                (&mut after_tx[..last], &mut before_tx[0..0])
+            } else {
+                let last = before_tx.len() - 1;
+                (after_tx, &mut before_tx[..last])
+            }
+        } else {
+            // The area from `tx` to `rx`, minus one unit, belongs to the driver.
+            (after_tx.split_at_mut(rx - tx - 1).0, &mut before_tx[0..0])
+        }
+    }
+
     /// Inform the GSP that it can process `elem_count` new pages from the command queue.
     fn advance_write_ptr(&mut self, elem_count: u32) {
         let gsp_mem = unsafe { self.access_mut() };
@@ -302,20 +326,6 @@ impl GspCmdq {
         })
     }
 
-    fn cpu_wptr(&self) -> u32 {
-        // SAFETY: index `0` is valid as `gsp_mem` has been allocated accordingly, thus the access
-        // cannot fail.
-        let gsp_mem = unsafe { &self.gsp_mem.0.as_slice(0, 1).unwrap_unchecked()[0] };
-        gsp_mem.cpuq.tx.write_ptr()
-    }
-
-    fn gsp_rptr(&self) -> u32 {
-        // SAFETY: index `0` is valid as `gsp_mem` has been allocated accordingly, thus the access
-        // cannot fail.
-        let gsp_mem = unsafe { &self.gsp_mem.0.as_slice(0, 1).unwrap_unchecked()[0] };
-        gsp_mem.gspq.rx.read_ptr()
-    }
-
     fn cpu_rptr(&self) -> u32 {
         // SAFETY: index `0` is valid as `gsp_mem` has been allocated accordingly, thus the access
         // cannot fail.
@@ -328,19 +338,6 @@ impl GspCmdq {
         // cannot fail.
         let gsp_mem = unsafe { &self.gsp_mem.0.as_slice(0, 1).unwrap_unchecked()[0] };
         gsp_mem.gspq.tx.write_ptr()
-    }
-
-    // Returns the numbers of pages free for sending an RPC to GSP.
-    fn free_tx_pages(&self) -> u32 {
-        let wptr = self.cpu_wptr();
-        let rptr = self.gsp_rptr();
-        let mut free = rptr + self.msg_count - wptr - 1;
-
-        if free >= self.msg_count {
-            free -= self.msg_count;
-        }
-
-        free
     }
 
     // Returns the number of pages the GSP has written to the queue.
@@ -370,56 +367,26 @@ impl GspCmdq {
     ) -> Result<GspQueueCommand<'a>> {
         const HEADER_SIZE: usize = size_of::<GspMsgElement>();
         let msg_size = HEADER_SIZE + cmd_size;
-        if self.free_tx_pages() < msg_size.div_ceil(GSP_PAGE_SIZE) as u32 {
+        let ptr = self as *mut GspCmdq;
+        let driver_area = self.gsp_mem.driver_write_area();
+        let free_tx_pages = driver_area.0.len() + driver_area.1.len();
+
+        if free_tx_pages < msg_size.div_ceil(GSP_PAGE_SIZE) {
             return Err(EAGAIN);
         }
-        let wptr = self.cpu_wptr() as usize;
 
-        // SAFETY: By the invariants of CoherentAllocation gsp_mem.start_ptr_mut() is valid.
-        let ptr = unsafe {
-            core::ptr::addr_of_mut!((*self.gsp_mem.0.start_ptr_mut()).cpuq.msgq.data[wptr])
-        };
+        let (msg_element_slice, slice_1) = driver_area
+            .0
+            .as_flattened_mut()
+            .split_at_mut(size_of::<GspMsgElement>());
+        let slice_2 = driver_area.1.as_flattened_mut();
 
-        // SAFETY: ptr points to at least one GSP_PAGE_SIZE bytes of contiguous
-        // memory which is larger than GspMsgHeader.
-        let msg_element_slice: &mut [u8] = unsafe {
-            core::slice::from_raw_parts_mut(ptr.cast::<u8>(), size_of::<GspMsgElement>())
-        };
         let msg_element = GspMsgElement::from_bytes_mut(msg_element_slice).ok_or(EINVAL)?;
         *msg_element = GspMsgElement::new(self.seq, cmd_size);
         self.seq += 1;
 
-        // Number of bytes left before we have to wrap the buffer
-        let remaining = ((self.msg_count as usize - wptr) << GSP_PAGE_SHIFT) - HEADER_SIZE;
-
-        let (slice_1, slice_2) = if cmd_size <= remaining {
-            // SAFETY: ptr points to a region of contiguous memory at least
-            // cmd_size + HEADER_SIZE long.
-            let slice_1: &mut [u8] = unsafe {
-                core::slice::from_raw_parts_mut(ptr.cast::<u8>().add(HEADER_SIZE), cmd_size)
-            };
-            slice_1.fill(0);
-            (slice_1, &mut [] as &mut [u8])
-        } else {
-            // SAFETY: ptr points to a region of contiguous memory remaining +
-            // HEADER_SIZE bytes long.
-            let slice_1: &mut [u8] = unsafe {
-                core::slice::from_raw_parts_mut(ptr.cast::<u8>().add(HEADER_SIZE), remaining)
-            };
-            // SAFETY: By the invariants of CoherentAllocation gsp_mem.start_ptr_mut() is valid.
-            let ptr = unsafe {
-                core::ptr::addr_of_mut!((*self.gsp_mem.0.start_ptr_mut()).cpuq.msgq.data[0])
-            };
-            // SAFETY: ptr points to a region of contiguous memory
-            // self.msg_count GSP_PAGE_SIZE pages long.
-            let slice_2: &mut [u8] =
-                unsafe { core::slice::from_raw_parts_mut(ptr.cast::<u8>(), remaining - cmd_size) };
-            slice_2.fill(0);
-            (slice_1, slice_2)
-        };
-
         Ok(GspQueueCommand {
-            cmdq: self,
+            cmdq: unsafe { &mut *ptr },
             msg_element,
             slice_1,
             slice_2,
