@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
 use core::mem::offset_of;
-use core::ptr;
 use core::sync::atomic::{fence, Ordering};
 
 use kernel::alloc::flags::GFP_KERNEL;
@@ -426,16 +425,6 @@ impl GspCmdq {
     }
 
     pub(crate) fn send_cmd_to_gsp(cmd: GspQueueCommand<'_>, bar: &Bar0) -> Result {
-        // Find the start of the message. We could also re-read the HW pointer.
-        // SAFETY: The command was previously allocated and initialised on the
-        // queue and is therefore not-NULL and aligned.
-        let slice_1: &[u8] = unsafe {
-            core::slice::from_raw_parts(
-                ptr::from_ref(cmd.msg_header).cast::<u8>(),
-                size_of::<GspMsgHeader>() + size_of::<GspRpcHeader>() + cmd.slice_1.len(),
-            )
-        };
-
         dev_info!(
             &cmd.cmdq.dev,
             "GSP RPC: send: seq# {}, function=0x{:x} ({}), length=0x{:x}\n",
@@ -446,8 +435,12 @@ impl GspCmdq {
         );
 
         // Calculate checksum over the entire message
-        cmd.msg_header.checksum =
-            GspCmdq::calculate_checksum(SBuffer::new_reader([slice_1, &cmd.slice_2[..]]));
+        cmd.msg_header.checksum = GspCmdq::calculate_checksum(SBuffer::new_reader([
+            cmd.msg_header.as_bytes(),
+            cmd.rpc_header.as_bytes(),
+            &cmd.slice_1[..],
+            &cmd.slice_2[..],
+        ]));
 
         let mut wptr = cmd.cmdq.cpu_wptr();
         wptr += cmd.msg_header.elem_count;
