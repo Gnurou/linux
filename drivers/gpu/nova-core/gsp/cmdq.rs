@@ -34,8 +34,6 @@ use crate::regs::NV_PGSP_QUEUE_HEAD;
 use crate::sbuffer::SBuffer;
 use crate::util::wait_on;
 
-const GSP_COMMAND_TIMEOUT: i64 = 5;
-
 pub(crate) trait GspCommandToGsp: Sized {
     const FUNCTION: u32;
 }
@@ -243,10 +241,6 @@ impl<'a> GspQueueCommand<'a> {
     }
 
     pub(crate) fn send_to_gsp(self, bar: &Bar0) -> Result {
-        self.cmdq.wait_for_free_cmd_to_gsp(
-            Delta::from_secs(GSP_COMMAND_TIMEOUT),
-            self.rpc_header.length as usize + size_of::<GspMsgHeader>(),
-        )?;
         GspCmdq::send_cmd_to_gsp(self, bar)?;
         Ok(())
     }
@@ -343,16 +337,6 @@ impl GspCmdq {
             .fold(0, |acc, (rol, byte)| acc ^ u64::from(byte).rotate_left(rol));
 
         ((sum64 >> 32) as u32) ^ (sum64 as u32)
-    }
-
-    pub(crate) fn wait_for_free_cmd_to_gsp(&self, timeout: Delta, size: usize) -> Result {
-        wait_on(timeout, || {
-            if self.free_tx_pages() < size.div_ceil(GSP_PAGE_SIZE) as u32 {
-                None
-            } else {
-                Some(())
-            }
-        })
     }
 
     pub(crate) fn alloc_gsp_queue_command<'a>(
