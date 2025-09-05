@@ -4,7 +4,7 @@ use core::sync::atomic::{fence, Ordering};
 
 use kernel::alloc::flags::GFP_KERNEL;
 use kernel::device;
-use kernel::dma::CoherentAllocation;
+use kernel::dma::{CoherentAllocation, DmaAddress};
 use kernel::dma_write;
 use kernel::prelude::*;
 use kernel::sync::aref::ARef;
@@ -146,11 +146,56 @@ unsafe impl AsBytes for GspMem {}
 // that is not a problem because they are not used outside the kernel.
 unsafe impl FromBytes for GspMem {}
 
+/// `GspMem` struct that is shared with the GSP.
+struct DmaGspMem(CoherentAllocation<GspMem>);
+
+impl DmaGspMem {
+    fn new(dev: &device::Device<device::Bound>) -> Result<Self> {
+        const MSGQ_SIZE: u32 = size_of::<Msgq>() as u32;
+        const RX_HDR_OFF: u32 = offset_of!(Msgq, rx) as u32;
+
+        let mut gsp_mem =
+            CoherentAllocation::<GspMem>::alloc_coherent(dev, 1, GFP_KERNEL | __GFP_ZERO)?;
+        create_pte_array(&mut gsp_mem, 0);
+        dma_write!(gsp_mem[0].cpuq.tx = MsgqTxHeader::new(MSGQ_SIZE, RX_HDR_OFF))?;
+        dma_write!(gsp_mem[0].cpuq.rx = MsgqRxHeader::new())?;
+
+        Ok(Self(gsp_mem))
+    }
+
+    fn dma_handle(&self) -> DmaAddress {
+        self.0.dma_handle()
+    }
+
+    /// # Safety
+    ///
+    /// The caller must ensure that the device doesn't access the parts of the [`GspMem`] it works
+    /// with.
+    unsafe fn access_mut(&mut self) -> &mut GspMem {
+        // SAFETY:
+        // - The [`CoherentAllocation`] contains exactly one object.
+        // - Per the safety statement of the function, no concurrent access wil be performed.
+        &mut unsafe { self.0.as_slice_mut(0, 1) }.unwrap()[0]
+    }
+
+    /// Inform the GSP that it can process `elem_count` new pages from the command queue.
+    fn advance_write_ptr(&mut self, elem_count: u32) {
+        let gsp_mem = unsafe { self.access_mut() };
+        gsp_mem.cpuq.tx.advance_write_ptr(elem_count);
+    }
+
+    /// Inform the GSP that it can send `elem_count` new pages into the message queue.
+    fn advance_read_ptr(&mut self, elem_count: u32) {
+        let gsp_mem = unsafe { self.access_mut() };
+        gsp_mem.cpuq.rx.advance_read_ptr(elem_count);
+    }
+}
+
 pub(crate) struct GspCmdq {
     dev: ARef<device::Device>,
     msg_count: u32,
     seq: u32,
-    gsp_mem: CoherentAllocation<GspMem>,
+    gsp_mem: DmaGspMem,
     pub nr_ptes: u32,
 }
 
@@ -241,20 +286,12 @@ impl<'a> GspQueueCommand<'a> {
 
 impl GspCmdq {
     pub(crate) fn new(dev: &device::Device<device::Bound>) -> Result<GspCmdq> {
-        let mut gsp_mem =
-            CoherentAllocation::<GspMem>::alloc_coherent(dev, 1, GFP_KERNEL | __GFP_ZERO)?;
-
+        let gsp_mem = DmaGspMem::new(dev)?;
         let nr_ptes = size_of::<GspMem>() >> GSP_PAGE_SHIFT;
         build_assert!(nr_ptes * size_of::<u64>() <= GSP_PAGE_SIZE);
 
-        create_pte_array(&mut gsp_mem, 0);
-
-        const MSGQ_SIZE: u32 = size_of::<Msgq>() as u32;
         //TODO: this is equal to MSGQ_NUM_PAGES...
-        const MSG_COUNT: u32 = ((MSGQ_SIZE as usize - GSP_PAGE_SIZE) / GSP_PAGE_SIZE) as u32;
-        const RX_HDR_OFF: u32 = offset_of!(Msgq, rx) as u32;
-        dma_write!(gsp_mem[0].cpuq.tx = MsgqTxHeader::new(MSGQ_SIZE, RX_HDR_OFF))?;
-        dma_write!(gsp_mem[0].cpuq.rx = MsgqRxHeader::new())?;
+        const MSG_COUNT: u32 = ((size_of::<Msgq>() - GSP_PAGE_SIZE) / GSP_PAGE_SIZE) as u32;
 
         Ok(GspCmdq {
             dev: dev.into(),
@@ -268,28 +305,28 @@ impl GspCmdq {
     fn cpu_wptr(&self) -> u32 {
         // SAFETY: index `0` is valid as `gsp_mem` has been allocated accordingly, thus the access
         // cannot fail.
-        let gsp_mem = unsafe { &self.gsp_mem.as_slice(0, 1).unwrap_unchecked()[0] };
+        let gsp_mem = unsafe { &self.gsp_mem.0.as_slice(0, 1).unwrap_unchecked()[0] };
         gsp_mem.cpuq.tx.write_ptr()
     }
 
     fn gsp_rptr(&self) -> u32 {
         // SAFETY: index `0` is valid as `gsp_mem` has been allocated accordingly, thus the access
         // cannot fail.
-        let gsp_mem = unsafe { &self.gsp_mem.as_slice(0, 1).unwrap_unchecked()[0] };
+        let gsp_mem = unsafe { &self.gsp_mem.0.as_slice(0, 1).unwrap_unchecked()[0] };
         gsp_mem.gspq.rx.read_ptr()
     }
 
     fn cpu_rptr(&self) -> u32 {
         // SAFETY: index `0` is valid as `gsp_mem` has been allocated accordingly, thus the access
         // cannot fail.
-        let gsp_mem = unsafe { &self.gsp_mem.as_slice(0, 1).unwrap_unchecked()[0] };
+        let gsp_mem = unsafe { &self.gsp_mem.0.as_slice(0, 1).unwrap_unchecked()[0] };
         gsp_mem.cpuq.rx.read_ptr()
     }
 
     fn gsp_wptr(&self) -> u32 {
         // SAFETY: index `0` is valid as `gsp_mem` has been allocated accordingly, thus the access
         // cannot fail.
-        let gsp_mem = unsafe { &self.gsp_mem.as_slice(0, 1).unwrap_unchecked()[0] };
+        let gsp_mem = unsafe { &self.gsp_mem.0.as_slice(0, 1).unwrap_unchecked()[0] };
         gsp_mem.gspq.tx.write_ptr()
     }
 
@@ -340,7 +377,7 @@ impl GspCmdq {
 
         // SAFETY: By the invariants of CoherentAllocation gsp_mem.start_ptr_mut() is valid.
         let ptr = unsafe {
-            core::ptr::addr_of_mut!((*self.gsp_mem.start_ptr_mut()).cpuq.msgq.data[wptr])
+            core::ptr::addr_of_mut!((*self.gsp_mem.0.start_ptr_mut()).cpuq.msgq.data[wptr])
         };
 
         // SAFETY: ptr points to at least one GSP_PAGE_SIZE bytes of contiguous
@@ -371,7 +408,7 @@ impl GspCmdq {
             };
             // SAFETY: By the invariants of CoherentAllocation gsp_mem.start_ptr_mut() is valid.
             let ptr = unsafe {
-                core::ptr::addr_of_mut!((*self.gsp_mem.start_ptr_mut()).cpuq.msgq.data[0])
+                core::ptr::addr_of_mut!((*self.gsp_mem.0.start_ptr_mut()).cpuq.msgq.data[0])
             };
             // SAFETY: ptr points to a region of contiguous memory
             // self.msg_count GSP_PAGE_SIZE pages long.
@@ -408,10 +445,8 @@ impl GspCmdq {
                 &cmd.slice_2[..],
             ])));
 
-        let gsp_mem = unsafe { &mut cmd.cmdq.gsp_mem.as_slice_mut(0, 1).unwrap_unchecked()[0] };
-        gsp_mem
-            .cpuq
-            .tx
+        cmd.cmdq
+            .gsp_mem
             .advance_write_ptr(cmd.msg_element.elem_count());
 
         NV_PGSP_QUEUE_HEAD::default().set_address(0).write(bar);
@@ -431,7 +466,7 @@ impl GspCmdq {
         let rptr = self.cpu_rptr();
         // SAFETY: By the invariants of CoherentAllocation gsp_mem.start_ptr() is valid.
         let ptr = unsafe {
-            core::ptr::addr_of!((*self.gsp_mem.start_ptr()).gspq.msgq.data[rptr as usize])
+            core::ptr::addr_of!((*self.gsp_mem.0.start_ptr()).gspq.msgq.data[rptr as usize])
         };
 
         // SAFETY: ptr points to at least GSP_PAGE_SIZE bytes of memory which is
@@ -478,7 +513,7 @@ impl GspCmdq {
 
         // SAFETY: By the invariants of CoherentAllocation gsp_mem.start_ptr_mut() is valid.
         let ptr = unsafe {
-            core::ptr::addr_of_mut!((*self.gsp_mem.start_ptr_mut()).gspq.msgq.data[rptr as usize])
+            core::ptr::addr_of_mut!((*self.gsp_mem.0.start_ptr_mut()).gspq.msgq.data[rptr as usize])
         };
 
         // SAFETY: ptr points to a region of memory remaining bytes long.
@@ -522,7 +557,7 @@ impl GspCmdq {
             // SAFETY: By the invariants of CoherentAllocation gsp_mem.start_ptr_mut() is valid and
             // large enough to hold gsp_mem.
             let ptr =
-                unsafe { core::ptr::addr_of!((*self.gsp_mem.start_ptr_mut()).gspq.msgq.data[0]) };
+                unsafe { core::ptr::addr_of!((*self.gsp_mem.0.start_ptr_mut()).gspq.msgq.data[0]) };
             // SAFETY: ptr pointers to self.msg_count GSP_PAGE_SIZE bytes of memory which by the
             // earlier check is greater than rpc_data_length.
             let slice_2 = unsafe {
@@ -570,8 +605,7 @@ impl GspCmdq {
     fn ack_msg(&mut self, length: u32) -> Result {
         const HEADER_SIZE: u32 = size_of::<GspMsgElement>() as u32;
         let num_elems = (HEADER_SIZE + length).div_ceil(GSP_PAGE_SIZE as u32);
-        let gsp_mem = unsafe { &mut self.gsp_mem.as_slice_mut(0, 1).unwrap_unchecked()[0] };
-        gsp_mem.cpuq.rx.advance_read_ptr(num_elems);
+        self.gsp_mem.advance_read_ptr(num_elems);
 
         Ok(())
     }
