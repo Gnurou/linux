@@ -422,13 +422,13 @@ impl GspCmdq {
             };
             // SAFETY: By the invariants of CoherentAllocation gsp_mem.start_ptr_mut() is valid.
             let ptr = unsafe {
-                core::ptr::addr_of_mut!((*self.gsp_mem.start_ptr_mut()).gspq.msgq.data[0])
+                core::ptr::addr_of_mut!((*self.gsp_mem.start_ptr_mut()).cpuq.msgq.data[0])
             };
             // SAFETY: ptr points to a region of contiguous memory
             // self.msg_count GSP_PAGE_SIZE pages long.
             let slice_2: &mut [u8] =
                 unsafe { core::slice::from_raw_parts_mut(ptr.cast::<u8>(), remaining - cmd_size) };
-            slice_1.fill(0);
+            slice_2.fill(0);
             (slice_1, slice_2)
         };
 
