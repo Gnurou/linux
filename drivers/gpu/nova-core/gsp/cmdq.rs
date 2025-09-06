@@ -134,7 +134,6 @@ static_assert!(align_of::<MsgqData>() == GSP_PAGE_SIZE);
 // There is no struct defined for this in the open-gpu-kernel-source headers.
 // Instead it is defined by code in GspMsgQueuesInit().
 #[repr(C)]
-#[derive(Debug)]
 struct Msgq {
     tx: MsgqTxHeader,
     rx: MsgqRxHeader,
@@ -142,7 +141,6 @@ struct Msgq {
 }
 
 #[repr(C)]
-#[derive(Debug)]
 struct GspMem {
     ptes: [u8; GSP_PAGE_SIZE],
     cpuq: Msgq,
