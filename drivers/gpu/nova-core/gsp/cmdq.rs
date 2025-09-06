@@ -361,6 +361,26 @@ impl GspCmdq {
         ((sum64 >> 32) as u32) ^ (sum64 as u32)
     }
 
+    pub(crate) fn send_gsp_command<M: GspCommandToGsp>(
+        &mut self,
+        bar: &Bar0,
+        cmd_size: usize,
+        init: impl FnOnce(&mut M, SBuffer<core::array::IntoIter<&mut [u8], 2>>) -> Result,
+    ) -> Result {
+        let mut qcmd = self.alloc_gsp_queue_command(cmd_size)?;
+
+        let (cmd, sbuffer) = qcmd.try_as::<M>();
+
+        init(
+            cmd,
+            sbuffer.unwrap_or_else(|| {
+                SBuffer::new_writer([&mut [] as &mut [u8], &mut [] as &mut [u8]])
+            }),
+        )?;
+
+        qcmd.send_to_gsp(bar)
+    }
+
     pub(crate) fn alloc_gsp_queue_command<'a>(
         &'a mut self,
         cmd_size: usize,

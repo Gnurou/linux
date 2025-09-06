@@ -74,9 +74,12 @@ impl GspCommandToGsp for GspStaticConfigInfo_t {
 }
 
 pub(crate) fn get_gsp_info(cmdq: &mut GspCmdq, bar: &Bar0) -> Result<GspStaticConfigInfo> {
-    let mut msg = cmdq.alloc_gsp_queue_command(size_of::<GspStaticConfigInfo_t>())?;
-    msg.try_as::<GspStaticConfigInfo_t>();
-    msg.send_to_gsp(bar)?;
+    cmdq.send_gsp_command::<GspStaticConfigInfo_t>(
+        bar,
+        size_of::<GspStaticConfigInfo_t>(),
+        |_, _| Ok(()),
+    )?;
+
     cmdq.wait_for_msg_from_gsp(Delta::from_secs(5))?;
     let msg = cmdq.receive_msg_from_gsp()?;
     let info = msg.try_as::<GspStaticConfigInfo_t>().map(|(x, _)| x)?;
@@ -226,15 +229,10 @@ pub(crate) fn build_registry(cmdq: &mut GspCmdq, bar: &Bar0) -> Result {
             },
         ],
     };
-    let mut msg = cmdq.alloc_gsp_queue_command(registry.size())?;
-    {
-        let (_, some_sbuf) = msg.try_as::<GspRegistryTable>();
-        let sbuf = some_sbuf.ok_or(ENOMEM)?;
-        registry.copy_to_sbuf_iter(sbuf)?;
-    }
-    msg.send_to_gsp(bar)?;
 
-    Ok(())
+    cmdq.send_gsp_command::<GspRegistryTable>(bar, registry.size(), |_, sbuffer| {
+        registry.copy_to_sbuf_iter(sbuffer)
+    })
 }
 
 impl GspCommandToGsp for GspSystemInfo {
@@ -247,10 +245,7 @@ pub(crate) fn set_system_info(
     bar: &Bar0,
 ) -> Result {
     build_assert!(size_of::<GspSystemInfo>() < GSP_PAGE_SIZE);
-    let mut msg = cmdq.alloc_gsp_queue_command(size_of::<GspSystemInfo>())?;
-    {
-        let (info, _) = msg.try_as::<GspSystemInfo>();
-
+    cmdq.send_gsp_command::<GspSystemInfo>(bar, size_of::<GspSystemInfo>(), |info, _| {
         info.gpuPhysAddr = dev.resource_start(0)?;
         info.gpuPhysFbAddr = dev.resource_start(1)?;
         info.gpuPhysInstAddr = dev.resource_start(3)?;
@@ -268,7 +263,9 @@ pub(crate) fn set_system_info(
         info.PCIRevisionID = u32::from(dev.revision_id());
         info.bIsPrimary = 0;
         info.bPreserveVideoMemoryAllocations = 0;
-    }
-    msg.send_to_gsp(bar)?;
+
+        Ok(())
+    })?;
+
     Ok(())
 }
