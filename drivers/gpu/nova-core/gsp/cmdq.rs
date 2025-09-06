@@ -33,7 +33,7 @@ use crate::regs::NV_PGSP_QUEUE_HEAD;
 use crate::sbuffer::SBuffer;
 use crate::util::wait_on;
 
-pub(crate) trait GspCommandToGsp: Sized {
+pub(crate) trait GspCommandToGsp: Sized + FromBytes + AsBytes {
     const FUNCTION: u32;
 }
 
@@ -268,46 +268,6 @@ impl<'a> GspQueueMessage<'a> {
     }
 }
 
-// The same as GspQueueMessage except the fields are mutable for constructing a
-// message to the GSP.
-pub(crate) struct GspQueueCommand<'a> {
-    cmdq: &'a mut GspCmdq,
-    msg_element: &'a mut GspMsgElement,
-    slice_1: &'a mut [u8],
-    slice_2: &'a mut [u8],
-}
-
-type GspQueueCommandData<'a, M> = (
-    &'a mut M,
-    Option<SBuffer<core::array::IntoIter<&'a mut [u8], 2>>>,
-);
-
-impl<'a> GspQueueCommand<'a> {
-    pub(crate) fn try_as<'b, M: GspCommandToGsp>(&'b mut self) -> GspQueueCommandData<'b, M> {
-        // SAFETY: The slice references the cmdq message memory which is
-        // guaranteed to outlive the returned GspQueueCommandData by the
-        // invariants of GspQueueCommand and the lifetime 'a.
-        let msg = unsafe { &mut *(self.slice_1.as_mut_ptr().cast::<M>()) };
-        let data = &mut self.slice_1[size_of::<M>()..];
-        let data_size = self.msg_element.rpc_header().length() as usize
-            - size_of::<GspRpcHeader>()
-            - size_of::<M>();
-        let sbuf = if data_size > 0 {
-            Some(SBuffer::new_writer([data, self.slice_2]))
-        } else {
-            None
-        };
-        self.msg_element.rpc_header_mut().set_function(M::FUNCTION);
-
-        (msg, sbuf)
-    }
-
-    pub(crate) fn send_to_gsp(self, bar: &Bar0) -> Result {
-        GspCmdq::send_cmd_to_gsp(self, bar)?;
-        Ok(())
-    }
-}
-
 impl GspCmdq {
     pub(crate) fn new(dev: &device::Device<device::Bound>) -> Result<GspCmdq> {
         let gsp_mem = DmaGspMem::new(dev)?;
@@ -367,75 +327,64 @@ impl GspCmdq {
         cmd_size: usize,
         init: impl FnOnce(&mut M, SBuffer<core::array::IntoIter<&mut [u8], 2>>) -> Result,
     ) -> Result {
-        let mut qcmd = self.alloc_gsp_queue_command(cmd_size)?;
-
-        let (cmd, sbuffer) = qcmd.try_as::<M>();
-
-        init(
-            cmd,
-            sbuffer.unwrap_or_else(|| {
-                SBuffer::new_writer([&mut [] as &mut [u8], &mut [] as &mut [u8]])
-            }),
-        )?;
-
-        qcmd.send_to_gsp(bar)
-    }
-
-    pub(crate) fn alloc_gsp_queue_command<'a>(
-        &'a mut self,
-        cmd_size: usize,
-    ) -> Result<GspQueueCommand<'a>> {
-        const HEADER_SIZE: usize = size_of::<GspMsgElement>();
-        let msg_size = HEADER_SIZE + cmd_size;
-        let ptr = self as *mut GspCmdq;
+        // TODO: a method that extracts the regions for a given command?
+        // ... and another that reduces the region to a given number of bytes!
         let driver_area = self.gsp_mem.driver_write_area();
         let free_tx_pages = driver_area.0.len() + driver_area.1.len();
 
+        let msg_size = size_of::<GspMsgElement>() + cmd_size;
         if free_tx_pages < msg_size.div_ceil(GSP_PAGE_SIZE) {
             return Err(EAGAIN);
         }
 
-        let (msg_element_slice, slice_1) = driver_area
-            .0
-            .as_flattened_mut()
-            .split_at_mut(size_of::<GspMsgElement>());
-        let slice_2 = driver_area.1.as_flattened_mut();
+        let (msg_element, cmd, payload_1, payload_2) = {
+            let (msg_element_slice, mut slice_1) = driver_area
+                .0
+                .as_flattened_mut()
+                .split_at_mut(size_of::<GspMsgElement>());
+            let msg_element = GspMsgElement::from_bytes_mut(msg_element_slice).ok_or(EINVAL)?;
+            let mut payload_2 = driver_area.1.as_flattened_mut();
 
-        let msg_element = GspMsgElement::from_bytes_mut(msg_element_slice).ok_or(EINVAL)?;
+            // TODO: Replace this workaround to cut the payload size.
+            if slice_1.len() >= cmd_size {
+                slice_1 = &mut slice_1[0..cmd_size];
+            } else {
+                payload_2 = &mut payload_2[0..cmd_size - slice_1.len()];
+            }
+
+            let (cmd_slice, payload_1) = slice_1.split_at_mut(size_of::<M>());
+            let cmd = M::from_bytes_mut(cmd_slice).ok_or(EINVAL)?;
+
+            (msg_element, cmd, payload_1, payload_2)
+        };
+
+        let sbuffer = SBuffer::new_writer([&mut payload_1[..], &mut payload_2[..]]);
+        init(cmd, sbuffer)?;
+
         *msg_element = GspMsgElement::new(self.seq, cmd_size);
-        self.seq += 1;
+        msg_element.rpc_header_mut().set_function(M::FUNCTION);
+        // TODO: maybe we can join the slices to simplify the sbuffer? Or just keep the original
+        // areas...
+        msg_element.set_checksum(GspCmdq::calculate_checksum(SBuffer::new_reader([
+            msg_element.as_bytes(),
+            cmd.as_bytes(),
+            payload_1,
+            payload_2,
+        ])));
 
-        Ok(GspQueueCommand {
-            cmdq: unsafe { &mut *ptr },
-            msg_element,
-            slice_1,
-            slice_2,
-        })
-    }
-
-    pub(crate) fn send_cmd_to_gsp(cmd: GspQueueCommand<'_>, bar: &Bar0) -> Result {
-        let rpc_header = cmd.msg_element.rpc_header();
+        let rpc_header = msg_element.rpc_header();
         dev_info!(
-            &cmd.cmdq.dev,
+            &self.dev,
             "GSP RPC: send: seq# {}, function=0x{:x} ({}), length=0x{:x}\n",
-            cmd.cmdq.seq - 1,
+            self.seq,
             rpc_header.function(),
             decode_gsp_function(rpc_header.function()),
             rpc_header.length(),
         );
 
-        // Calculate checksum over the entire message
-        cmd.msg_element
-            .set_checksum(GspCmdq::calculate_checksum(SBuffer::new_reader([
-                cmd.msg_element.as_bytes(),
-                &cmd.slice_1[..],
-                &cmd.slice_2[..],
-            ])));
-
-        cmd.cmdq
-            .gsp_mem
-            .advance_write_ptr(cmd.msg_element.elem_count());
-
+        let elem_count = msg_element.elem_count();
+        self.seq += 1;
+        self.gsp_mem.advance_write_ptr(elem_count);
         NV_PGSP_QUEUE_HEAD::default().set_address(0).write(bar);
 
         Ok(())

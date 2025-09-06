@@ -32,6 +32,7 @@ unsafe impl AsBytes for GspSystemInfo {}
 unsafe impl FromBytes for GspSystemInfo {}
 
 unsafe impl FromBytes for GspStaticConfigInfo_t {}
+unsafe impl AsBytes for GspStaticConfigInfo_t {}
 
 pub(crate) struct GspStaticConfigInfo {
     pub gpu_name: [u8; 40],
@@ -120,6 +121,10 @@ struct RegistryTable {
 }
 
 struct GspRegistryTable;
+
+unsafe impl FromBytes for GspRegistryTable {}
+unsafe impl AsBytes for GspRegistryTable {}
+
 impl GspCommandToGsp for GspRegistryTable {
     const FUNCTION: u32 = NV_VGPU_MSG_FUNCTION_SET_REGISTRY;
 }
