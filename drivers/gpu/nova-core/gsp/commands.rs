@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
 
-use core::alloc::Layout;
-
-use kernel::alloc::allocator::Kmalloc;
-use kernel::alloc::Allocator;
 use kernel::build_assert;
 use kernel::device;
 use kernel::pci;
@@ -129,85 +125,47 @@ impl GspCommandToGsp for GspRegistryTable {
     const FUNCTION: u32 = NV_VGPU_MSG_FUNCTION_SET_REGISTRY;
 }
 
+unsafe impl AsBytes for PACKED_REGISTRY_TABLE {}
+unsafe impl AsBytes for PACKED_REGISTRY_ENTRY {}
+
 impl RegistryTable {
-    fn serialize_registry_table(&self) -> Result<KVec<u8>> {
-        let entries = &self.entries;
-        let total_size = self.size();
-        let align = core::mem::align_of::<PACKED_REGISTRY_TABLE>();
-        let layout = Layout::from_size_align(total_size, align).map_err(|_| ENOMEM)?;
-        debug_assert_eq!(layout.size(), total_size);
-        let mut string_data_offset = size_of::<PACKED_REGISTRY_TABLE>()
-            + GSP_REGISTRY_NUM_ENTRIES * size_of::<PACKED_REGISTRY_ENTRY>();
-        let allocation = Kmalloc::alloc(layout, GFP_KERNEL)?;
-        let ptr = allocation.as_ptr().cast::<u8>();
-
-        // We allocate the memory for the vector ourselves to ensure it has the
-        // correct layout to cast to a PACKED_REGISTRY_TABLE and subsequent
-        // fw:PACKED_REGISTRY_ENTRIES.
-        //
-        // SAFETY:
-        //  - ptr was allocated with Kmalloc as required for KVec.
-        //  - ptr trivally meets the alignment requirements for u8.
-        //  - No elements have been initialised so this is zero length.
-        //  - The capacity matches the total size of the allocation.
-        let mut table_vec = unsafe { KVec::<u8>::from_raw_parts(ptr, 0, layout.size()) };
-        let table_slice = table_vec.spare_capacity_mut();
-        let table = table_slice.as_mut_ptr().cast::<PACKED_REGISTRY_TABLE>();
-
-        // SAFETY: We ensured the alignment was correct when allocating the vector.
-        unsafe {
-            // Set the table header
-            (*table).numEntries = GSP_REGISTRY_NUM_ENTRIES as u32;
-            (*table).size = total_size as u32;
-        }
-
-        for (i, entry) in entries.iter().enumerate().take(GSP_REGISTRY_NUM_ENTRIES) {
-            // SAFETY: The allocation meets the alignment requirements for
-            // fw::PACKED_REGISTRY_TABLE which includes a zero length array for the entries.
-            unsafe {
-                let entry_ptr = table_slice
-                    .as_mut_ptr()
-                    .add(
-                        size_of::<PACKED_REGISTRY_TABLE>() + i * size_of::<PACKED_REGISTRY_ENTRY>(),
-                    )
-                    .cast::<PACKED_REGISTRY_ENTRY>();
-
-                // Set entry metadata
-                (*entry_ptr).nameOffset = string_data_offset as u32;
-                (*entry_ptr).type_ = REGISTRY_TABLE_ENTRY_TYPE_DWORD as u8;
-                (*entry_ptr).data = entry.value;
-                (*entry_ptr).length = 0;
+    fn write_into_sbuffer<'a, I: Iterator<Item = &'a mut [u8]>>(
+        &self,
+        mut sbuffer: SBuffer<I>,
+    ) -> Result {
+        sbuffer.write_all(
+            PACKED_REGISTRY_TABLE {
+                numEntries: GSP_REGISTRY_NUM_ENTRIES as u32,
+                size: self.size() as u32,
+                entries: Default::default(),
             }
+            .as_bytes(),
+        )?;
+
+        let string_data_start_offset = size_of::<PACKED_REGISTRY_TABLE>()
+            + GSP_REGISTRY_NUM_ENTRIES * size_of::<PACKED_REGISTRY_ENTRY>();
+
+        // Array for string data.
+        let mut string_data = KVec::new();
+
+        for entry in self.entries.iter().take(GSP_REGISTRY_NUM_ENTRIES) {
+            sbuffer.write_all(
+                PACKED_REGISTRY_ENTRY {
+                    nameOffset: (string_data_start_offset + string_data.len()) as u32,
+                    type_: REGISTRY_TABLE_ENTRY_TYPE_DWORD as u8,
+                    __bindgen_padding_0: Default::default(),
+                    data: entry.value,
+                    length: 0,
+                }
+                .as_bytes(),
+            )?;
 
             let key_bytes = entry.key.as_bytes();
-            let string_dest_slice =
-                &mut table_slice[string_data_offset..string_data_offset + key_bytes.len() + 1];
-
-            // Can't use copy_from_slice() because string_dest_slice is MaybeUninit<u8>.
-            for (i, &byte) in key_bytes.iter().enumerate() {
-                string_dest_slice[i].write(byte);
-            }
-
-            // Add null terminator
-            string_dest_slice[key_bytes.len()].write(0);
-
-            // Update offset for next string
-            string_data_offset += string_dest_slice.len();
+            string_data.extend_from_slice(key_bytes, GFP_KERNEL)?;
+            string_data.push(0, GFP_KERNEL)?;
         }
 
-        debug_assert_eq!(total_size, string_data_offset);
-
-        // SAFETY: All data has been written to as asserted above and the
-        // capacity matches the original allocation.
-        unsafe { table_vec.inc_len(layout.size()) };
-
-        Ok(table_vec)
-    }
-
-    fn copy_to_sbuf_iter(&self, mut sbuf: SBuffer<core::array::IntoIter<&mut [u8], 2>>) -> Result {
-        let table_vec = self.serialize_registry_table()?;
-        sbuf.write_all(&table_vec)?;
-        Ok(())
+        sbuffer.write_all(string_data.as_slice())
     }
 
     fn size(&self) -> usize {
@@ -236,7 +194,7 @@ pub(crate) fn build_registry(cmdq: &mut GspCmdq, bar: &Bar0) -> Result {
     };
 
     cmdq.send_gsp_command::<GspRegistryTable>(bar, registry.size(), |_, sbuffer| {
-        registry.copy_to_sbuf_iter(sbuffer)
+        registry.write_into_sbuffer(sbuffer)
     })
 }
 
