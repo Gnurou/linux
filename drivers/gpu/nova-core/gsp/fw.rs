@@ -362,11 +362,12 @@ unsafe impl AsBytes for GspRpcHeader {}
 unsafe impl FromBytes for GspRpcHeader {}
 
 impl GspRpcHeader {
-    pub(crate) fn new(cmd_size: u32) -> Self {
+    pub(crate) fn new(cmd_size: u32, function: u32) -> Self {
         Self(bindings::rpc_message_header_v {
             // TODO: magic number
             header_version: 0x03000000,
             signature: bindings::NV_VGPU_MSG_SIGNATURE_VALID,
+            function,
             // TODO: overflow check?
             length: size_of::<Self>() as u32 + cmd_size,
             rpc_result: 0xffffffff,
@@ -383,11 +384,6 @@ impl GspRpcHeader {
         self.0.function
     }
 
-    // TODO: Hack. Should be set by constructor.
-    pub(crate) fn set_function(&mut self, function: u32) {
-        self.0.function = function;
-    }
-
     pub(crate) fn length(&self) -> u32 {
         self.0.length
     }
@@ -401,24 +397,19 @@ unsafe impl AsBytes for GspMsgElement {}
 unsafe impl FromBytes for GspMsgElement {}
 
 impl GspMsgElement {
-    pub(crate) fn new(sequence: u32, cmd_size: usize) -> Self {
+    pub(crate) fn new(sequence: u32, cmd_size: usize, function: u32) -> Self {
         Self(bindings::GSP_MSG_QUEUE_ELEMENT {
             seqNum: sequence,
             // TODO: overflow check and fallible div?
             elemCount: (size_of::<Self>() + cmd_size).div_ceil(GSP_PAGE_SIZE) as u32,
             // TODO: fallible conversion.
-            rpc: GspRpcHeader::new(cmd_size as u32).0,
+            rpc: GspRpcHeader::new(cmd_size as u32, function).0,
             ..Default::default()
         })
     }
 
     pub(crate) fn rpc_header(&self) -> &GspRpcHeader {
         unsafe { core::mem::transmute(&self.0.rpc) }
-    }
-
-    // TODO: Hack. Remove once we can set the function of the RPC header in the constructor.
-    pub(crate) fn rpc_header_mut(&mut self) -> &mut GspRpcHeader {
-        unsafe { core::mem::transmute(&mut self.0.rpc) }
     }
 
     // TODO: Hack. Checksum should be automatically computed?

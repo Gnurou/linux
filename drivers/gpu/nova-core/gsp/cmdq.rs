@@ -361,8 +361,7 @@ impl GspCmdq {
         let sbuffer = SBuffer::new_writer([&mut payload_1[..], &mut payload_2[..]]);
         init(cmd, sbuffer)?;
 
-        *msg_element = GspMsgElement::new(self.seq, cmd_size);
-        msg_element.rpc_header_mut().set_function(M::FUNCTION);
+        *msg_element = GspMsgElement::new(self.seq, cmd_size, M::FUNCTION);
         // TODO: maybe we can join the slices to simplify the sbuffer? Or just keep the original
         // areas...
         msg_element.set_checksum(GspCmdq::calculate_checksum(SBuffer::new_reader([
