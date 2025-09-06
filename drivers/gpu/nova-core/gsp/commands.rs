@@ -16,14 +16,9 @@ use crate::gsp::cmdq::{GspCommandToGsp, GspMessageFromGsp};
 use crate::gsp::GspCmdq;
 use crate::gsp::GSP_PAGE_SIZE;
 use crate::gsp::fw::{
-    NV_VGPU_MSG_EVENT_GSP_INIT_DONE,
-    NV_VGPU_MSG_FUNCTION_SET_REGISTRY,
-    NV_VGPU_MSG_FUNCTION_GSP_SET_SYSTEM_INFO,
-    NV_VGPU_MSG_FUNCTION_GET_GSP_STATIC_INFO,
-    GspStaticConfigInfo_t,
-    GspSystemInfo,
-    PACKED_REGISTRY_TABLE,
-    PACKED_REGISTRY_ENTRY,
+    GspStaticConfigInfo_t, GspSystemInfo, NV_VGPU_MSG_EVENT_GSP_INIT_DONE,
+    NV_VGPU_MSG_FUNCTION_GET_GSP_STATIC_INFO, NV_VGPU_MSG_FUNCTION_GSP_SET_SYSTEM_INFO,
+    NV_VGPU_MSG_FUNCTION_SET_REGISTRY, PACKED_REGISTRY_ENTRY, PACKED_REGISTRY_TABLE,
     REGISTRY_TABLE_ENTRY_TYPE_DWORD,
 };
 use crate::sbuffer::SBuffer;
@@ -165,8 +160,7 @@ impl RegistryTable {
                 let entry_ptr = table_slice
                     .as_mut_ptr()
                     .add(
-                        size_of::<PACKED_REGISTRY_TABLE>()
-                            + i * size_of::<PACKED_REGISTRY_ENTRY>(),
+                        size_of::<PACKED_REGISTRY_TABLE>() + i * size_of::<PACKED_REGISTRY_ENTRY>(),
                     )
                     .cast::<PACKED_REGISTRY_ENTRY>();
 
