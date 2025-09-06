@@ -324,7 +324,7 @@ impl GspCmdq {
     pub(crate) fn send_gsp_command<M: GspCommandToGsp>(
         &mut self,
         bar: &Bar0,
-        cmd_size: usize,
+        payload_size: usize,
         init: impl FnOnce(&mut M, SBuffer<core::array::IntoIter<&mut [u8], 2>>) -> Result,
     ) -> Result {
         // TODO: a method that extracts the regions for a given command?
@@ -332,28 +332,28 @@ impl GspCmdq {
         let driver_area = self.gsp_mem.driver_write_area();
         let free_tx_pages = driver_area.0.len() + driver_area.1.len();
 
-        let msg_size = size_of::<GspMsgElement>() + cmd_size;
+        // Total size of the message, including the headers, command, and optional payload.
+        let msg_size = size_of::<GspMsgElement>() + size_of::<M>() + payload_size;
         if free_tx_pages < msg_size.div_ceil(GSP_PAGE_SIZE) {
             return Err(EAGAIN);
         }
 
         let (msg_element, cmd, payload_1, payload_2) = {
-            let (msg_element_slice, mut slice_1) = driver_area
+            let (msg_element_slice, slice_1) = driver_area
                 .0
                 .as_flattened_mut()
                 .split_at_mut(size_of::<GspMsgElement>());
             let msg_element = GspMsgElement::from_bytes_mut(msg_element_slice).ok_or(EINVAL)?;
-            let mut payload_2 = driver_area.1.as_flattened_mut();
-
-            // TODO: Replace this workaround to cut the payload size.
-            if slice_1.len() >= cmd_size {
-                slice_1 = &mut slice_1[0..cmd_size];
-            } else {
-                payload_2 = &mut payload_2[0..cmd_size - slice_1.len()];
-            }
-
             let (cmd_slice, payload_1) = slice_1.split_at_mut(size_of::<M>());
             let cmd = M::from_bytes_mut(cmd_slice).ok_or(EINVAL)?;
+            let payload_2 = driver_area.1.as_flattened_mut();
+            // TODO: Replace this workaround to cut the payload size.
+            let (payload_1, payload_2) = match payload_size.checked_sub(payload_1.len()) {
+                // The payload is longer than `payload_1`, set `payload_2` size to the difference.
+                Some(payload_2_len) => (payload_1, &mut payload_2[..payload_2_len]),
+                // `payload_1` is longer than the payload, we need to reduce its size.
+                None => (&mut payload_1[..payload_size], payload_2),
+            };
 
             (msg_element, cmd, payload_1, payload_2)
         };
@@ -361,7 +361,7 @@ impl GspCmdq {
         let sbuffer = SBuffer::new_writer([&mut payload_1[..], &mut payload_2[..]]);
         init(cmd, sbuffer)?;
 
-        *msg_element = GspMsgElement::new(self.seq, cmd_size, M::FUNCTION);
+        *msg_element = GspMsgElement::new(self.seq, size_of::<M>() + payload_size, M::FUNCTION);
         // TODO: maybe we can join the slices to simplify the sbuffer? Or just keep the original
         // areas...
         msg_element.set_checksum(GspCmdq::calculate_checksum(SBuffer::new_reader([

@@ -71,11 +71,7 @@ impl GspCommandToGsp for GspStaticConfigInfo_t {
 }
 
 pub(crate) fn get_gsp_info(cmdq: &mut GspCmdq, bar: &Bar0) -> Result<GspStaticConfigInfo> {
-    cmdq.send_gsp_command::<GspStaticConfigInfo_t>(
-        bar,
-        size_of::<GspStaticConfigInfo_t>(),
-        |_, _| Ok(()),
-    )?;
+    cmdq.send_gsp_command::<GspStaticConfigInfo_t>(bar, 0, |_, _| Ok(()))?;
 
     cmdq.wait_for_msg_from_gsp(Delta::from_secs(5))?;
     let msg = cmdq.receive_msg_from_gsp()?;
@@ -116,32 +112,19 @@ struct RegistryTable {
     entries: [RegistryEntry; GSP_REGISTRY_NUM_ENTRIES],
 }
 
-struct GspRegistryTable;
-
-unsafe impl FromBytes for GspRegistryTable {}
-unsafe impl AsBytes for GspRegistryTable {}
-
-impl GspCommandToGsp for GspRegistryTable {
+impl GspCommandToGsp for PACKED_REGISTRY_TABLE {
     const FUNCTION: u32 = NV_VGPU_MSG_FUNCTION_SET_REGISTRY;
 }
 
+unsafe impl FromBytes for PACKED_REGISTRY_TABLE {}
 unsafe impl AsBytes for PACKED_REGISTRY_TABLE {}
 unsafe impl AsBytes for PACKED_REGISTRY_ENTRY {}
 
 impl RegistryTable {
-    fn write_into_sbuffer<'a, I: Iterator<Item = &'a mut [u8]>>(
+    fn write_payload<'a, I: Iterator<Item = &'a mut [u8]>>(
         &self,
         mut sbuffer: SBuffer<I>,
     ) -> Result {
-        sbuffer.write_all(
-            PACKED_REGISTRY_TABLE {
-                numEntries: GSP_REGISTRY_NUM_ENTRIES as u32,
-                size: self.size() as u32,
-                entries: Default::default(),
-            }
-            .as_bytes(),
-        )?;
-
         let string_data_start_offset = size_of::<PACKED_REGISTRY_TABLE>()
             + GSP_REGISTRY_NUM_ENTRIES * size_of::<PACKED_REGISTRY_ENTRY>();
 
@@ -173,9 +156,7 @@ impl RegistryTable {
         for i in 0..GSP_REGISTRY_NUM_ENTRIES {
             key_size += self.entries[i].key.len() + 1; // +1 for NULL terminator
         }
-        size_of::<PACKED_REGISTRY_TABLE>()
-            + GSP_REGISTRY_NUM_ENTRIES * size_of::<PACKED_REGISTRY_ENTRY>()
-            + key_size
+        GSP_REGISTRY_NUM_ENTRIES * size_of::<PACKED_REGISTRY_ENTRY>() + key_size
     }
 }
 
@@ -193,8 +174,15 @@ pub(crate) fn build_registry(cmdq: &mut GspCmdq, bar: &Bar0) -> Result {
         ],
     };
 
-    cmdq.send_gsp_command::<GspRegistryTable>(bar, registry.size(), |_, sbuffer| {
-        registry.write_into_sbuffer(sbuffer)
+    cmdq.send_gsp_command::<PACKED_REGISTRY_TABLE>(bar, registry.size(), |table, sbuffer| {
+        // TODO: we need a constructor for this...
+        *table = PACKED_REGISTRY_TABLE {
+            numEntries: GSP_REGISTRY_NUM_ENTRIES as u32,
+            size: registry.size() as u32,
+            entries: Default::default(),
+        };
+
+        registry.write_payload(sbuffer)
     })
 }
 
@@ -208,7 +196,7 @@ pub(crate) fn set_system_info(
     bar: &Bar0,
 ) -> Result {
     build_assert!(size_of::<GspSystemInfo>() < GSP_PAGE_SIZE);
-    cmdq.send_gsp_command::<GspSystemInfo>(bar, size_of::<GspSystemInfo>(), |info, _| {
+    cmdq.send_gsp_command::<GspSystemInfo>(bar, 0, |info, _| {
         info.gpuPhysAddr = dev.resource_start(0)?;
         info.gpuPhysFbAddr = dev.resource_start(1)?;
         info.gpuPhysInstAddr = dev.resource_start(3)?;
