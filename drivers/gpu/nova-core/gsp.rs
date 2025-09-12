@@ -122,4 +122,8 @@ impl Gsp {
     pub(crate) fn libos_dma_handle(&self) -> bindings::dma_addr_t {
         self.libos.dma_handle()
     }
+
+    pub(crate) fn cmdq(self: Pin<&mut Self>) -> &mut GspCmdq {
+        unsafe { &mut self.get_unchecked_mut().cmdq }
+    }
 }
