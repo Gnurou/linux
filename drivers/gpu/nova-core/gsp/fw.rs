@@ -15,7 +15,9 @@ use kernel::transmute::{AsBytes, FromBytes};
 use crate::firmware::gsp::GspFirmware;
 use crate::gpu::Chipset;
 use crate::gsp;
+use crate::gsp::cmdq::MSGQ_NUM_PAGES;
 use crate::gsp::FbLayout;
+use crate::gsp::GSP_PAGE_SIZE;
 
 /// Dummy type to group methods related to heap parameters for running the GSP firmware.
 pub(crate) struct GspFwHeapParams(());
@@ -159,6 +161,37 @@ pub(crate) use r570_144::{
     // GSP firmware constants
     GSP_FW_WPR_META_MAGIC,
     GSP_FW_WPR_META_REVISION,
+
+    // GSP events
+    NV_VGPU_MSG_EVENT_GSP_INIT_DONE,
+    NV_VGPU_MSG_EVENT_GSP_LOCKDOWN_NOTICE,
+    NV_VGPU_MSG_EVENT_GSP_POST_NOCAT_RECORD,
+    NV_VGPU_MSG_EVENT_GSP_RUN_CPU_SEQUENCER,
+    NV_VGPU_MSG_EVENT_MMU_FAULT_QUEUED,
+    NV_VGPU_MSG_EVENT_OS_ERROR_LOG,
+    NV_VGPU_MSG_EVENT_POST_EVENT,
+    NV_VGPU_MSG_EVENT_RC_TRIGGERED,
+    NV_VGPU_MSG_EVENT_UCODE_LIBOS_PRINT,
+
+    // GSP function calls
+    NV_VGPU_MSG_FUNCTION_ALLOC_CHANNEL_DMA,
+    NV_VGPU_MSG_FUNCTION_ALLOC_CTX_DMA,
+    NV_VGPU_MSG_FUNCTION_ALLOC_DEVICE,
+    NV_VGPU_MSG_FUNCTION_ALLOC_MEMORY,
+    NV_VGPU_MSG_FUNCTION_ALLOC_OBJECT,
+    NV_VGPU_MSG_FUNCTION_ALLOC_ROOT,
+    NV_VGPU_MSG_FUNCTION_BIND_CTX_DMA,
+    NV_VGPU_MSG_FUNCTION_FREE,
+    NV_VGPU_MSG_FUNCTION_GET_GSP_STATIC_INFO,
+    NV_VGPU_MSG_FUNCTION_GET_STATIC_INFO,
+    NV_VGPU_MSG_FUNCTION_GSP_INIT_POST_OBJGPU,
+    NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL,
+    NV_VGPU_MSG_FUNCTION_GSP_SET_SYSTEM_INFO,
+    NV_VGPU_MSG_FUNCTION_LOG,
+    NV_VGPU_MSG_FUNCTION_MAP_MEMORY,
+    NV_VGPU_MSG_FUNCTION_NOP,
+    NV_VGPU_MSG_FUNCTION_SET_GUEST_SYSTEM_INFO,
+    NV_VGPU_MSG_FUNCTION_SET_REGISTRY,
 };
 
 #[repr(transparent)]
@@ -195,5 +228,88 @@ impl LibosMemoryRegionInitArgument {
             loc: bindings::LibosMemoryRegionLoc_LIBOS_MEMORY_REGION_LOC_SYSMEM as u8,
             ..Default::default()
         })
+    }
+}
+
+pub(crate) type MsgqTxHeader = bindings::msgqTxHeader;
+
+// SAFETY: Padding is explicit and will not contain uninitialized data.
+unsafe impl AsBytes for MsgqTxHeader {}
+
+impl MsgqTxHeader {
+    pub(crate) fn new(msgq_size: u32, rx_hdr_offset: u32) -> Self {
+        Self {
+            version: 0,
+            size: msgq_size,
+            msgSize: GSP_PAGE_SIZE as u32,
+            msgCount: MSGQ_NUM_PAGES,
+            writePtr: 0,
+            flags: 1,
+            rxHdrOff: rx_hdr_offset,
+            entryOff: GSP_PAGE_SIZE as u32,
+        }
+    }
+}
+
+/// RX header for setting up a message queue with the GSP.
+///
+/// # Invariants
+///
+/// [`Self::read_ptr`] is guaranteed to return a value in the range `0..NUM_PAGES`.
+pub(crate) type MsgqRxHeader = bindings::msgqRxHeader;
+
+// SAFETY: Padding is explicit and will not contain uninitialized data.
+unsafe impl AsBytes for MsgqRxHeader {}
+
+impl MsgqRxHeader {
+    pub(crate) fn new() -> Self {
+        Default::default()
+    }
+}
+
+pub(crate) type GspRpcHeader = bindings::rpc_message_header_v;
+
+// SAFETY: Padding is explicit and will not contain uninitialized data.
+unsafe impl AsBytes for GspRpcHeader {}
+
+// SAFETY: This struct only contains integer types for which all bit patterns
+// are valid.
+unsafe impl FromBytes for GspRpcHeader {}
+
+impl GspRpcHeader {
+    pub(crate) fn new(cmd_size: u32, function: u32) -> Self {
+        Self {
+            // TODO: magic number
+            header_version: 0x03000000,
+            signature: bindings::NV_VGPU_MSG_SIGNATURE_VALID,
+            function,
+            // TODO: overflow check?
+            length: size_of::<Self>() as u32 + cmd_size,
+            rpc_result: 0xffffffff,
+            rpc_result_private: 0xffffffff,
+            ..Default::default()
+        }
+    }
+}
+
+pub(crate) type GspMsgElement = bindings::GSP_MSG_QUEUE_ELEMENT;
+
+// SAFETY: Padding is explicit and will not contain uninitialized data.
+unsafe impl AsBytes for GspMsgElement {}
+
+// SAFETY: This struct only contains integer types for which all bit patterns
+// are valid.
+unsafe impl FromBytes for GspMsgElement {}
+
+impl GspMsgElement {
+    pub(crate) fn new(sequence: u32, cmd_size: usize, function: u32) -> Self {
+        Self {
+            seqNum: sequence,
+            // TODO: overflow check and fallible div?
+            elemCount: (size_of::<Self>() + cmd_size).div_ceil(GSP_PAGE_SIZE) as u32,
+            // TODO: fallible conversion.
+            rpc: GspRpcHeader::new(cmd_size as u32, function),
+            ..Default::default()
+        }
     }
 }

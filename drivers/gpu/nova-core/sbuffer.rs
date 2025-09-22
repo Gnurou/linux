@@ -37,7 +37,6 @@ impl<'a, I> SBuffer<I>
 where
     I: Iterator,
 {
-    #[expect(unused)]
     pub(crate) fn new_reader(slices: impl IntoIterator<IntoIter = I>) -> Self
     where
         I: Iterator<Item = &'a [u8]>,
@@ -45,7 +44,6 @@ where
         Self::new(slices)
     }
 
-    #[expect(unused)]
     pub(crate) fn new_writer(slices: impl IntoIterator<IntoIter = I>) -> Self
     where
         I: Iterator<Item = &'a mut [u8]>,
