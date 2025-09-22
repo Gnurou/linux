@@ -32,7 +32,7 @@ pub(crate) const GSP_HEAP_ALIGNMENT: Alignment = Alignment::new::<{ 1 << 20 }>()
 /// GSP runtime data.
 #[pin_data]
 pub(crate) struct Gsp {
-    libos: CoherentAllocation<LibosMemoryRegionInitArgument>,
+    pub libos: CoherentAllocation<LibosMemoryRegionInitArgument>,
     pub loginit: CoherentAllocation<u8>,
     pub logintr: CoherentAllocation<u8>,
     pub logrm: CoherentAllocation<u8>,
