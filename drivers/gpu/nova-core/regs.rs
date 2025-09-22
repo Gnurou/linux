@@ -324,6 +324,11 @@ register!(NV_PFALCON2_FALCON_BROM_PARAADDR @ PFalcon2Base[0x00000210[1]] {
 
 // PRISCV
 
+register!(NV_PRISCV_RISCV_CPUCTL @ PFalconBase[0x00001388] {
+    7:7     active_stat as bool;
+    0:0     halted as bool;
+});
+
 register!(NV_PRISCV_RISCV_BCR_CTRL @ PFalconBase[0x00001668] {
     0:0     valid as bool;
     4:4     core_select as bool => PeregrineCoreSelect;
