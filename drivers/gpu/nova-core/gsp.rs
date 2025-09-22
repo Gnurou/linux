@@ -13,6 +13,7 @@ use kernel::prelude::*;
 use kernel::ptr::Alignment;
 use kernel::transmute::{AsBytes, FromBytes};
 
+use crate::fb::FbLayout;
 use fw::LibosMemoryRegionInitArgument;
 
 pub(crate) const GSP_PAGE_SHIFT: usize = 12;
