@@ -243,7 +243,6 @@ impl GspCmdq {
         ((sum64 >> 32) as u32) ^ (sum64 as u32)
     }
 
-    #[expect(unused)]
     pub(crate) fn send_gsp_command<M: GspCommandToGsp>(
         &mut self,
         bar: &Bar0,

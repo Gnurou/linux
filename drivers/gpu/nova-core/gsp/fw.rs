@@ -158,6 +158,9 @@ impl GspFwWprMeta {
 }
 
 pub(crate) use r570_144::{
+    // Core GSP structures
+    GspSystemInfo,
+
     GSP_ARGUMENTS_CACHED,
 
     // GSP firmware constants
@@ -198,6 +201,11 @@ pub(crate) use r570_144::{
     NV_VGPU_MSG_FUNCTION_NOP,
     NV_VGPU_MSG_FUNCTION_SET_GUEST_SYSTEM_INFO,
     NV_VGPU_MSG_FUNCTION_SET_REGISTRY,
+
+    // RM registry structures
+    PACKED_REGISTRY_ENTRY,
+    PACKED_REGISTRY_TABLE,
+    REGISTRY_TABLE_ENTRY_TYPE_DWORD,
 };
 
 #[repr(transparent)]
@@ -332,3 +340,13 @@ unsafe impl AsBytes for MESSAGE_QUEUE_INIT_ARGUMENTS {}
 
 // SAFETY: Padding is explicit and will not contain uninitialized data.
 unsafe impl AsBytes for GSP_SR_INIT_ARGUMENTS {}
+
+// SAFETY: This struct only contains integer types for which all bit patterns
+// are valid.
+unsafe impl FromBytes for PACKED_REGISTRY_TABLE {}
+
+// SAFETY: Padding is explicit and will not contain uninitialized data.
+unsafe impl AsBytes for PACKED_REGISTRY_TABLE {}
+
+// SAFETY: Padding is explicit and will not contain uninitialized data.
+unsafe impl AsBytes for PACKED_REGISTRY_ENTRY {}
