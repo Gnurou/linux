@@ -166,47 +166,39 @@ impl<'a> GspSequencer<'a> {
         bar: &'a Bar0,
         timeout: Delta,
     ) -> Result {
-        cmdq.wait_for_msg_from_gsp(timeout)?;
-        let msg = cmdq.receive_msg_from_gsp()?;
+        cmdq.receive_msg_from_gsp(timeout, |info, mut sbuf| {
+            let cmd_data = sbuf.read_into_kvec(GFP_KERNEL)?;
+            let seq_info = GspSequencerInfo { info, cmd_data };
 
-        let (info, mut sbuf) = msg.try_as::<fw::rpc_run_cpu_sequencer_v17_00>()?;
-        let cmd_data = match sbuf {
-            Some(ref mut sbuf) => sbuf.read_into_kvec(GFP_KERNEL),
-            _ => Err(EINVAL),
-        }?;
-        let seq_info = GspSequencerInfo { info, cmd_data };
+            let sequencer = GspSequencer {
+                seq_info,
+                bar,
+                sec2_falcon,
+                gsp_falcon,
+                libos_dma_handle,
+                gsp_fw,
+                dev,
+            };
 
-        let sequencer = GspSequencer {
-            seq_info,
-            bar,
-            sec2_falcon,
-            gsp_falcon,
-            libos_dma_handle,
-            gsp_fw,
-            dev,
-        };
+            dev_dbg!(dev, "Running CPU Sequencer commands\n");
 
-        dev_dbg!(dev, "Running CPU Sequencer commands\n");
-
-        for cmd_result in &sequencer {
-            match cmd_result {
-                Ok(cmd) => cmd.run(&sequencer)?,
-                Err(e) => {
-                    dev_err!(
-                        dev,
-                        "Error running command at index {}\n",
-                        sequencer.seq_info.info.cmdIndex
-                    );
-                    return Err(e);
+            for cmd_result in &sequencer {
+                match cmd_result {
+                    Ok(cmd) => cmd.run(&sequencer)?,
+                    Err(e) => {
+                        dev_err!(
+                            dev,
+                            "Error running command at index {}\n",
+                            sequencer.seq_info.info.cmdIndex
+                        );
+                        return Err(e);
+                    }
                 }
             }
-        }
 
-        dev_dbg!(dev, "CPU Sequencer commands completed successfully\n");
+            dev_dbg!(dev, "CPU Sequencer commands completed successfully\n");
 
-        drop(sbuf);
-        msg.ack()?;
-
-        Ok(())
+            Ok(())
+        })
     }
 }

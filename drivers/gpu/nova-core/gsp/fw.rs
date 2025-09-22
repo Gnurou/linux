@@ -376,3 +376,6 @@ unsafe impl AsBytes for PACKED_REGISTRY_TABLE {}
 
 // SAFETY: Padding is explicit and will not contain uninitialized data.
 unsafe impl AsBytes for PACKED_REGISTRY_ENTRY {}
+
+// SAFETY: Padding is explicit and will not contain uninitialized data.
+unsafe impl AsBytes for r570_144::rpc_run_cpu_sequencer_v17_00 {}
