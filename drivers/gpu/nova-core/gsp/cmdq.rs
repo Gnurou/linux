@@ -99,7 +99,6 @@ impl DmaGspMem {
         Ok(Self(gsp_mem))
     }
 
-    #[expect(unused)]
     fn dma_handle(&self) -> DmaAddress {
         self.0.dma_handle()
     }
@@ -218,7 +217,7 @@ pub(crate) struct GspCmdq {
     dev: ARef<device::Device>,
     seq: u32,
     gsp_mem: DmaGspMem,
-    pub _nr_ptes: u32,
+    pub nr_ptes: u32,
 }
 
 impl GspCmdq {
@@ -231,7 +230,7 @@ impl GspCmdq {
             dev: dev.into(),
             seq: 0,
             gsp_mem,
-            _nr_ptes: nr_ptes as u32,
+            nr_ptes: nr_ptes as u32,
         })
     }
 
@@ -381,6 +380,15 @@ impl GspCmdq {
         self.gsp_mem
             .advance_cpu_read_ptr(msg_header.rpc.length.div_ceil(GSP_PAGE_SIZE as u32));
         result
+    }
+
+    pub(crate) fn get_cmdq_offsets(&self) -> (u64, u64, u64) {
+        (
+            self.gsp_mem.dma_handle(),
+            core::mem::offset_of!(Msgq, msgq) as u64,
+            (core::mem::offset_of!(GspMem, gspq) - core::mem::offset_of!(GspMem, cpuq)
+                + core::mem::offset_of!(Msgq, msgq)) as u64,
+        )
     }
 }
 

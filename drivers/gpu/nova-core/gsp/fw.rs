@@ -158,9 +158,15 @@ impl GspFwWprMeta {
 }
 
 pub(crate) use r570_144::{
+    GSP_ARGUMENTS_CACHED,
+
     // GSP firmware constants
     GSP_FW_WPR_META_MAGIC,
     GSP_FW_WPR_META_REVISION,
+    GSP_SR_INIT_ARGUMENTS,
+
+    // RM message queue parameters
+    MESSAGE_QUEUE_INIT_ARGUMENTS,
 
     // GSP events
     NV_VGPU_MSG_EVENT_GSP_INIT_DONE,
@@ -313,3 +319,16 @@ impl GspMsgElement {
         }
     }
 }
+
+// SAFETY: Padding is explicit and will not contain uninitialized data.
+unsafe impl AsBytes for GSP_ARGUMENTS_CACHED {}
+
+// SAFETY: This struct only contains integer types for which all bit patterns
+// are valid.
+unsafe impl FromBytes for GSP_ARGUMENTS_CACHED {}
+
+// SAFETY: Padding is explicit and will not contain uninitialized data.
+unsafe impl AsBytes for MESSAGE_QUEUE_INIT_ARGUMENTS {}
+
+// SAFETY: Padding is explicit and will not contain uninitialized data.
+unsafe impl AsBytes for GSP_SR_INIT_ARGUMENTS {}

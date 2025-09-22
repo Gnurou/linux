@@ -17,7 +17,10 @@ use kernel::transmute::{AsBytes, FromBytes};
 use crate::fb::FbLayout;
 use crate::gsp::cmdq::GspCmdq;
 
-use fw::LibosMemoryRegionInitArgument;
+use fw::{
+    LibosMemoryRegionInitArgument, GSP_ARGUMENTS_CACHED, GSP_SR_INIT_ARGUMENTS,
+    MESSAGE_QUEUE_INIT_ARGUMENTS,
+};
 
 pub(crate) mod cmdq;
 
@@ -33,6 +36,7 @@ pub(crate) struct Gsp {
     pub logintr: CoherentAllocation<u8>,
     pub logrm: CoherentAllocation<u8>,
     pub cmdq: GspCmdq,
+    rmargs: CoherentAllocation<GSP_ARGUMENTS_CACHED>,
 }
 
 /// Creates a self-mapping page table for `obj` at its beginning.
@@ -90,12 +94,35 @@ impl Gsp {
 
         // Creates its own PTE array
         let cmdq = GspCmdq::new(dev)?;
+        let rmargs =
+            create_coherent_dma_object::<GSP_ARGUMENTS_CACHED>(dev, "RMARGS", 1, &mut libos, 3)?;
+        let (shared_mem_phys_addr, cmd_queue_offset, stat_queue_offset) = cmdq.get_cmdq_offsets();
+
+        dma_write!(
+            rmargs[0].messageQueueInitArguments = MESSAGE_QUEUE_INIT_ARGUMENTS {
+                sharedMemPhysAddr: shared_mem_phys_addr,
+                pageTableEntryCount: cmdq.nr_ptes,
+                cmdQueueOffset: cmd_queue_offset,
+                statQueueOffset: stat_queue_offset,
+                ..Default::default()
+            }
+        )?;
+        dma_write!(
+            rmargs[0].srInitArguments = GSP_SR_INIT_ARGUMENTS {
+                oldLevel: 0,
+                flags: 0,
+                bInPMTransition: 0,
+                ..Default::default()
+            }
+        )?;
+        dma_write!(rmargs[0].bDmemStack = 1)?;
 
         Ok(try_pin_init!(Self {
             libos,
             loginit,
             logintr,
             logrm,
+            rmargs,
             cmdq,
         }))
     }
