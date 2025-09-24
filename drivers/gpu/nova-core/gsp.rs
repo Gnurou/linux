@@ -8,11 +8,12 @@ pub(crate) use fw::{GspFwWprMeta, LibosParams};
 use kernel::alloc::flags::GFP_KERNEL;
 use kernel::device;
 use kernel::dma::CoherentAllocation;
+use kernel::dma::DmaAddress;
 use kernel::dma_write;
 use kernel::pci;
 use kernel::prelude::*;
 use kernel::ptr::Alignment;
-use kernel::transmute::{AsBytes, FromBytes};
+use kernel::transmute::AsBytes;
 
 use crate::fb::FbLayout;
 use crate::gsp::cmdq::GspCmdq;
@@ -29,6 +30,9 @@ pub(crate) const GSP_PAGE_SHIFT: usize = 12;
 pub(crate) const GSP_PAGE_SIZE: usize = 1 << GSP_PAGE_SHIFT;
 pub(crate) const GSP_HEAP_ALIGNMENT: Alignment = Alignment::new::<{ 1 << 20 }>();
 
+/// Number of GSP pages to use in a RM log buffer.
+const RM_LOG_BUFFER_NUM_PAGES: usize = 0x10;
+
 /// GSP runtime data.
 #[pin_data]
 pub(crate) struct Gsp {
@@ -40,40 +44,43 @@ pub(crate) struct Gsp {
     rmargs: CoherentAllocation<GSP_ARGUMENTS_CACHED>,
 }
 
-/// Creates a self-mapping page table for `obj` at its beginning.
-fn create_pte_array<T: AsBytes + FromBytes>(obj: &mut CoherentAllocation<T>, skip: usize) {
-    let num_pages = obj.size().div_ceil(GSP_PAGE_SIZE);
-    let handle = obj.dma_handle();
+#[repr(C)]
+struct PteArray<const NUM_ENTRIES: usize>([u64; NUM_ENTRIES]);
 
-    // SAFETY:
-    //  - By the invariants of the CoherentAllocation ptr is non-NULL.
-    //  - CoherentAllocation CPU addresses are always aligned to a
-    //    page-boundary, satisfying the alignment requirements for
-    //    from_raw_parts_mut()
-    //  - The allocation size is at least as long as 8 * num_pages as
-    //    GSP_PAGE_SIZE is larger than 8 bytes.
-    let ptes = unsafe {
-        let ptr = obj.start_ptr_mut().cast::<u64>().add(skip);
-        core::slice::from_raw_parts_mut(ptr, num_pages)
-    };
+/// SAFETY: arrays of `u64` implement `AsBytes` and we are but a wrapper around it.
+unsafe impl<const NUM_ENTRIES: usize> AsBytes for PteArray<NUM_ENTRIES> {}
 
-    for (i, pte) in ptes.iter_mut().enumerate() {
-        *pte = handle + ((i as u64) << GSP_PAGE_SHIFT);
+impl<const NUM_PAGES: usize> PteArray<NUM_PAGES> {
+    fn new(handle: DmaAddress) -> Self {
+        let mut ptes = [0u64; NUM_PAGES];
+
+        for (i, pte) in ptes.iter_mut().enumerate() {
+            *pte = handle + ((i as u64) << GSP_PAGE_SHIFT);
+        }
+
+        Self(ptes)
     }
 }
 
 /// Creates a new `CoherentAllocation<A>` with `name` of `size` elements, and
 /// register it into the `libos` object at argument position `libos_arg_nr`.
-fn create_coherent_dma_object<A: AsBytes + FromBytes>(
+fn create_logbuffer_dma_object(
     dev: &device::Device<device::Bound>,
-    name: &'static str,
-    size: usize,
-    libos: &mut CoherentAllocation<LibosMemoryRegionInitArgument>,
-    libos_arg_nr: usize,
-) -> Result<CoherentAllocation<A>> {
-    let obj = CoherentAllocation::<A>::alloc_coherent(dev, size, GFP_KERNEL | __GFP_ZERO)?;
+) -> Result<CoherentAllocation<u8>> {
+    let mut obj = CoherentAllocation::<u8>::alloc_coherent(
+        dev,
+        RM_LOG_BUFFER_NUM_PAGES * GSP_PAGE_SIZE,
+        GFP_KERNEL | __GFP_ZERO,
+    )?;
 
-    dma_write!(libos[libos_arg_nr] = LibosMemoryRegionInitArgument::new(name, &obj))?;
+    let ptes = PteArray::<RM_LOG_BUFFER_NUM_PAGES>::new(obj.dma_handle());
+
+    // SAFETY: `obj` has just been created and we are its sole user.
+    unsafe {
+        // Copy the self-mapping PTE at the expected location.
+        obj.as_slice_mut(size_of::<u64>(), size_of_val(&ptes))?
+            .copy_from_slice(ptes.as_bytes())
+    };
 
     Ok(obj)
 }
@@ -81,30 +88,33 @@ fn create_coherent_dma_object<A: AsBytes + FromBytes>(
 impl Gsp {
     pub(crate) fn new(pdev: &pci::Device<device::Bound>) -> Result<impl PinInit<Self, Error>> {
         let dev = pdev.as_ref();
-        let mut libos = CoherentAllocation::<LibosMemoryRegionInitArgument>::alloc_coherent(
+        let libos = CoherentAllocation::<LibosMemoryRegionInitArgument>::alloc_coherent(
             dev,
             GSP_PAGE_SIZE / size_of::<LibosMemoryRegionInitArgument>(),
             GFP_KERNEL | __GFP_ZERO,
         )?;
-        let mut loginit = create_coherent_dma_object::<u8>(dev, "LOGINIT", 0x10000, &mut libos, 0)?;
-        create_pte_array(&mut loginit, 1);
-        let mut logintr = create_coherent_dma_object::<u8>(dev, "LOGINTR", 0x10000, &mut libos, 1)?;
-        create_pte_array(&mut logintr, 1);
-        let mut logrm = create_coherent_dma_object::<u8>(dev, "LOGRM", 0x10000, &mut libos, 2)?;
-        create_pte_array(&mut logrm, 1);
+        let loginit = create_logbuffer_dma_object(dev)?;
+        dma_write!(libos[0] = LibosMemoryRegionInitArgument::new("LOGINIT", &loginit))?;
+        let logintr = create_logbuffer_dma_object(dev)?;
+        dma_write!(libos[1] = LibosMemoryRegionInitArgument::new("LOGINTR", &logintr))?;
+        let logrm = create_logbuffer_dma_object(dev)?;
+        dma_write!(libos[2] = LibosMemoryRegionInitArgument::new("LOGRM", &logrm))?;
 
         // Creates its own PTE array
         let cmdq = GspCmdq::new(dev)?;
-        let rmargs =
-            create_coherent_dma_object::<GSP_ARGUMENTS_CACHED>(dev, "RMARGS", 1, &mut libos, 3)?;
-        let (shared_mem_phys_addr, cmd_queue_offset, stat_queue_offset) = cmdq.get_cmdq_offsets();
+        let rmargs = CoherentAllocation::<GSP_ARGUMENTS_CACHED>::alloc_coherent(
+            dev,
+            1,
+            GFP_KERNEL | __GFP_ZERO,
+        )?;
+        dma_write!(libos[3] = LibosMemoryRegionInitArgument::new("RMARGS", &rmargs))?;
 
         dma_write!(
             rmargs[0].messageQueueInitArguments = MESSAGE_QUEUE_INIT_ARGUMENTS {
-                sharedMemPhysAddr: shared_mem_phys_addr,
-                pageTableEntryCount: cmdq.nr_ptes,
-                cmdQueueOffset: cmd_queue_offset,
-                statQueueOffset: stat_queue_offset,
+                sharedMemPhysAddr: cmdq.dma_handle(),
+                pageTableEntryCount: GspCmdq::NUM_PTES as u32,
+                cmdQueueOffset: GspCmdq::CMDQ_OFFSET as u64,
+                statQueueOffset: GspCmdq::STATQ_OFFSET as u64,
                 ..Default::default()
             }
         )?;

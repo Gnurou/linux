@@ -29,8 +29,8 @@ use super::fw::{
     NV_VGPU_MSG_FUNCTION_SET_GUEST_SYSTEM_INFO, NV_VGPU_MSG_FUNCTION_SET_REGISTRY,
 };
 use crate::driver::Bar0;
-use crate::gsp::create_pte_array;
 use crate::gsp::fw::{GspMsgElement, MsgqRxHeader, MsgqTxHeader};
+use crate::gsp::PteArray;
 use crate::gsp::{GSP_PAGE_SHIFT, GSP_PAGE_SIZE};
 use crate::regs::NV_PGSP_QUEUE_HEAD;
 use crate::sbuffer::SBuffer;
@@ -69,7 +69,7 @@ struct Msgq {
 
 #[repr(C)]
 struct GspMem {
-    ptes: [u8; GSP_PAGE_SIZE],
+    ptes: PteArray<{ GSP_PAGE_SIZE / size_of::<u64>() }>,
     cpuq: Msgq,
     gspq: Msgq,
 }
@@ -90,17 +90,13 @@ impl DmaGspMem {
         const MSGQ_SIZE: u32 = size_of::<Msgq>() as u32;
         const RX_HDR_OFF: u32 = offset_of!(Msgq, rx) as u32;
 
-        let mut gsp_mem =
+        let gsp_mem =
             CoherentAllocation::<GspMem>::alloc_coherent(dev, 1, GFP_KERNEL | __GFP_ZERO)?;
-        create_pte_array(&mut gsp_mem, 0);
+        dma_write!(gsp_mem[0].ptes = PteArray::new(gsp_mem.dma_handle()))?;
         dma_write!(gsp_mem[0].cpuq.tx = MsgqTxHeader::new(MSGQ_SIZE, RX_HDR_OFF))?;
         dma_write!(gsp_mem[0].cpuq.rx = MsgqRxHeader::new())?;
 
         Ok(Self(gsp_mem))
-    }
-
-    fn dma_handle(&self) -> DmaAddress {
-        self.0.dma_handle()
     }
 
     /// # Safety
@@ -217,20 +213,35 @@ pub(crate) struct GspCmdq {
     dev: ARef<device::Device>,
     seq: u32,
     gsp_mem: DmaGspMem,
-    pub nr_ptes: u32,
 }
 
+// The page table entries for the GSP shared region must fit within a single page.
+static_assert!(GspCmdq::NUM_PTES * size_of::<u64>() <= GSP_PAGE_SIZE);
+
 impl GspCmdq {
+    /// Offset of the data after the PTEs.
+    const POST_PTE_OFFSET: usize = core::mem::offset_of!(GspMem, cpuq);
+
+    /// Offset of command queue ring buffer.
+    pub(crate) const CMDQ_OFFSET: usize = core::mem::offset_of!(GspMem, cpuq)
+        + core::mem::offset_of!(Msgq, msgq)
+        - Self::POST_PTE_OFFSET;
+
+    /// Offset of message queue ring buffer.
+    pub(crate) const STATQ_OFFSET: usize = core::mem::offset_of!(GspMem, gspq)
+        + core::mem::offset_of!(Msgq, msgq)
+        - Self::POST_PTE_OFFSET;
+
+    /// Number of page table entries for the GSP shared region.
+    pub(crate) const NUM_PTES: usize = size_of::<GspMem>() >> GSP_PAGE_SHIFT;
+
     pub(crate) fn new(dev: &device::Device<device::Bound>) -> Result<GspCmdq> {
         let gsp_mem = DmaGspMem::new(dev)?;
-        let nr_ptes = size_of::<GspMem>() >> GSP_PAGE_SHIFT;
-        build_assert!(nr_ptes * size_of::<u64>() <= GSP_PAGE_SIZE);
 
         Ok(GspCmdq {
             dev: dev.into(),
             seq: 0,
             gsp_mem,
-            nr_ptes: nr_ptes as u32,
         })
     }
 
@@ -381,13 +392,8 @@ impl GspCmdq {
         result
     }
 
-    pub(crate) fn get_cmdq_offsets(&self) -> (u64, u64, u64) {
-        (
-            self.gsp_mem.dma_handle(),
-            core::mem::offset_of!(Msgq, msgq) as u64,
-            (core::mem::offset_of!(GspMem, gspq) - core::mem::offset_of!(GspMem, cpuq)
-                + core::mem::offset_of!(Msgq, msgq)) as u64,
-        )
+    pub(crate) fn dma_handle(&self) -> DmaAddress {
+        self.gsp_mem.0.dma_handle()
     }
 }
 
