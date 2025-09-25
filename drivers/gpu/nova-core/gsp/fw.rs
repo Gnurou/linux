@@ -8,6 +8,7 @@ use r570_144 as bindings;
 use core::ops::Range;
 
 use kernel::dma::CoherentAllocation;
+use kernel::prelude::*;
 use kernel::ptr::{Alignable, Alignment};
 use kernel::sizes::{SZ_128K, SZ_1M};
 use kernel::transmute::{AsBytes, FromBytes};

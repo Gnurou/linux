@@ -36,9 +36,12 @@ use crate::regs::NV_PGSP_QUEUE_HEAD;
 use crate::sbuffer::SBuffer;
 use crate::util::wait_on;
 
-pub(crate) trait GspCommandToGsp: Sized + FromBytes + AsBytes {
+pub(crate) trait GspCommandToGsp: Sized + AsBytes {
     const FUNCTION: u32;
 }
+
+pub(crate) trait GspCommandToGspWithPayload: GspCommandToGsp {}
+pub(crate) trait GspCommandToGspWithoutPayload: GspCommandToGsp {}
 
 pub(crate) trait GspMessageFromGsp: Sized + FromBytes + AsBytes {
     const FUNCTION: u32;
@@ -162,6 +165,40 @@ impl DmaGspMem {
         }
     }
 
+    /// Tries to allocate `size` bytes on the command queue circular buffer.
+    ///
+    /// If enough space was available, two slices are returned. The first one starts at the address
+    /// of the CPU write pointer and ends either at `size` or at the end of the circular buffer,
+    /// whichever came first. If the first slice does not cover the whole requested allocation, the
+    /// second slice covers the remainder, starting at the beginning or the circular buffer.
+    ///
+    /// # Invariants
+    ///
+    /// The returned slices are both aligned to [`GSP_PAGE_SIZE`].
+    fn allocate_command(&mut self, size: usize) -> Result<(&mut [u8], &mut [u8])> {
+        let driver_area = self.driver_write_area();
+        let free_tx_pages = driver_area.0.len() + driver_area.1.len();
+
+        if free_tx_pages < size.div_ceil(GSP_PAGE_SIZE) {
+            return Err(EAGAIN);
+        }
+
+        // Flatten the slices into byte arrays.
+        let (slice_1, slice_2) = (
+            driver_area.0.as_flattened_mut(),
+            driver_area.1.as_flattened_mut(),
+        );
+
+        Ok(match size.checked_sub(slice_1.len()) {
+            // We need the second slice, return the full first slice and the second one
+            // truncated to the remainder of the requested size.
+            Some(remainder) => (slice_1, &mut slice_2[..remainder]),
+            // There is more space in the first slice than we need, truncate it and return an
+            // empty second slice.
+            None => (&mut slice_1[..size], &mut slice_2[0..0]),
+        })
+    }
+
     fn gsp_write_ptr(&self) -> u32 {
         let gsp_mem = &self.0;
         dma_read!(gsp_mem[0].gspq.tx.writePtr).unwrap() % MSGQ_NUM_PAGES
@@ -249,59 +286,63 @@ impl GspCmdq {
         ((sum64 >> 32) as u32) ^ (sum64 as u32)
     }
 
-    pub(crate) fn send_gsp_command<M: GspCommandToGsp>(
+    fn send_gsp_command_internal<M: GspCommandToGsp>(
         &mut self,
         bar: &Bar0,
+        init: impl Init<M>,
         payload_size: usize,
-        init: impl FnOnce(&mut M, SBuffer<core::array::IntoIter<&mut [u8], 2>>) -> Result,
+        init_payload: impl FnOnce(&mut SBuffer<core::array::IntoIter<&mut [u8], 2>>) -> Result,
     ) -> Result {
-        // TODO: a method that extracts the regions for a given command?
-        // ... and another that reduces the region to a given number of bytes!
-        let driver_area = self.gsp_mem.driver_write_area();
-        let free_tx_pages = driver_area.0.len() + driver_area.1.len();
-
-        // Total size of the message, including the headers, command, and optional payload.
-        let msg_size = size_of::<GspMsgElement>() + size_of::<M>() + payload_size;
-        if free_tx_pages < msg_size.div_ceil(GSP_PAGE_SIZE) {
-            return Err(EAGAIN);
+        #[repr(C)]
+        struct FullCommand<M> {
+            hdr: GspMsgElement,
+            cmd: M,
         }
 
-        let (msg_header, cmd, payload_1, payload_2) = {
-            // TODO: find an alternative to as_flattened_mut()
-            #[allow(clippy::incompatible_msrv)]
-            let (msg_header_slice, slice_1) = driver_area
-                .0
-                .as_flattened_mut()
-                .split_at_mut(size_of::<GspMsgElement>());
-            let msg_header = GspMsgElement::from_bytes_mut(msg_header_slice).ok_or(EINVAL)?;
-            let (cmd_slice, payload_1) = slice_1.split_at_mut(size_of::<M>());
-            let cmd = M::from_bytes_mut(cmd_slice).ok_or(EINVAL)?;
-            // TODO: find an alternative to as_flattened_mut()
-            #[allow(clippy::incompatible_msrv)]
-            let payload_2 = driver_area.1.as_flattened_mut();
-            // TODO: Replace this workaround to cut the payload size.
-            let (payload_1, payload_2) = match payload_size.checked_sub(payload_1.len()) {
-                // The payload is longer than `payload_1`, set `payload_2` size to the difference.
-                Some(payload_2_len) => (payload_1, &mut payload_2[..payload_2_len]),
-                // `payload_1` is longer than the payload, we need to reduce its size.
-                None => (&mut payload_1[..payload_size], payload_2),
-            };
+        // The command must fit within a single page, and within the first slice of the driver
+        // area.
+        build_assert!(size_of::<FullCommand<M>>() <= GSP_PAGE_SIZE);
 
-            (msg_header, cmd, payload_1, payload_2)
-        };
+        let (segment_1, segment_2) = self
+            .gsp_mem
+            .allocate_command(size_of::<FullCommand<M>>() + payload_size)?;
 
-        let sbuffer = SBuffer::new_writer([&mut payload_1[..], &mut payload_2[..]]);
-        init(cmd, sbuffer)?;
+        // Per the `build_assert` above, we know that the header and command fit into the first
+        // segment.
+        let (cmd_slice, segment_1_payload) = segment_1.split_at_mut(size_of::<FullCommand<M>>());
 
-        *msg_header = GspMsgElement::new(self.seq, size_of::<M>() + payload_size, M::FUNCTION);
-        msg_header.checkSum = GspCmdq::calculate_checksum(SBuffer::new_reader([
-            msg_header.as_bytes(),
-            cmd.as_bytes(),
-            payload_1,
-            payload_2,
-        ]));
+        let seq = self.seq;
+        let initializer = init!(FullCommand {
+            hdr: GspMsgElement::new(seq, size_of::<M>() + payload_size, M::FUNCTION),
+            cmd <- init,
+        });
+
+        // Fill the header and command in-place.
+        unsafe {
+            initializer.__init(cmd_slice.as_mut_ptr().cast())?;
+        }
+
+        // Fill the payload.
+        let mut sbuffer = SBuffer::new_writer([&mut segment_1_payload[..], &mut segment_2[..]]);
+        init_payload(&mut sbuffer)?;
+        if !sbuffer.is_empty() {
+            dev_warn!(
+                &self.dev,
+                "sent command did not fill the whole requested payload"
+            );
+            return Err(EINVAL);
+        }
+        drop(sbuffer);
+
+        // Compute the checksum and update it on the initialized header.
+        let checksum = GspCmdq::calculate_checksum(SBuffer::new_reader([&*segment_1, &*segment_2]));
+        let msg_header =
+            GspMsgElement::from_bytes_mut(segment_1.split_at_mut(size_of::<GspMsgElement>()).0)
+                .ok_or(EINVAL)?;
+        msg_header.checkSum = checksum;
 
         let rpc_header = &msg_header.rpc;
+        // TODO: dev_dbg?
         dev_info!(
             &self.dev,
             "GSP RPC: send: seq# {}, function=0x{:x} ({}), length=0x{:x}\n",
@@ -311,12 +352,31 @@ impl GspCmdq {
             rpc_header.length,
         );
 
+        // Advance write pointer, and signal availability of a new command to the GSP.
         let elem_count = msg_header.elemCount;
         self.seq += 1;
         self.gsp_mem.advance_cpu_write_ptr(elem_count);
         NV_PGSP_QUEUE_HEAD::default().set_address(0).write(bar);
 
         Ok(())
+    }
+
+    pub(crate) fn send_gsp_command_with_payload<M: GspCommandToGspWithPayload>(
+        &mut self,
+        bar: &Bar0,
+        init: impl Init<M>,
+        payload_size: usize,
+        init_payload: impl FnOnce(&mut SBuffer<core::array::IntoIter<&mut [u8], 2>>) -> Result,
+    ) -> Result {
+        self.send_gsp_command_internal(bar, init, payload_size, init_payload)
+    }
+
+    pub(crate) fn send_gsp_command<M: GspCommandToGspWithoutPayload>(
+        &mut self,
+        bar: &Bar0,
+        init: impl Init<M>,
+    ) -> Result {
+        self.send_gsp_command_internal(bar, init, 0, |_| Ok(()))
     }
 
     pub(crate) fn receive_msg_from_gsp<M: GspMessageFromGsp, R>(

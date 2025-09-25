@@ -15,6 +15,8 @@ use super::fw::{
 };
 use crate::driver::Bar0;
 use crate::gsp::cmdq::GspCmdq;
+use crate::gsp::cmdq::GspCommandToGspWithPayload;
+use crate::gsp::cmdq::GspCommandToGspWithoutPayload;
 use crate::gsp::cmdq::{GspCommandToGsp, GspMessageFromGsp};
 use crate::gsp::GSP_PAGE_SIZE;
 use crate::sbuffer::SBuffer;
@@ -58,8 +60,10 @@ impl GspCommandToGsp for GspStaticConfigInfo_t {
     const FUNCTION: u32 = NV_VGPU_MSG_FUNCTION_GET_GSP_STATIC_INFO;
 }
 
+impl GspCommandToGspWithoutPayload for GspStaticConfigInfo_t {}
+
 pub(crate) fn get_gsp_info(cmdq: &mut GspCmdq, bar: &Bar0) -> Result<GspStaticConfigInfo> {
-    cmdq.send_gsp_command::<GspStaticConfigInfo_t>(bar, 0, |_, _| Ok(()))?;
+    cmdq.send_gsp_command(bar, GspStaticConfigInfo_t::default())?;
     cmdq.receive_msg_from_gsp::<GspStaticConfigInfo_t, GspStaticConfigInfo>(
         Delta::from_secs(5),
         |info, _| {
@@ -101,10 +105,12 @@ impl GspCommandToGsp for PACKED_REGISTRY_TABLE {
     const FUNCTION: u32 = NV_VGPU_MSG_FUNCTION_SET_REGISTRY;
 }
 
+impl GspCommandToGspWithPayload for PACKED_REGISTRY_TABLE {}
+
 impl RegistryTable {
     fn write_payload<'a, I: Iterator<Item = &'a mut [u8]>>(
         &self,
-        mut sbuffer: SBuffer<I>,
+        sbuffer: &mut SBuffer<I>,
     ) -> Result {
         let string_data_start_offset = size_of::<PACKED_REGISTRY_TABLE>()
             + GSP_REGISTRY_NUM_ENTRIES * size_of::<PACKED_REGISTRY_ENTRY>();
@@ -155,21 +161,26 @@ pub(crate) fn build_registry(cmdq: &mut GspCmdq, bar: &Bar0) -> Result {
         ],
     };
 
-    cmdq.send_gsp_command::<PACKED_REGISTRY_TABLE>(bar, registry.size(), |table, sbuffer| {
-        // TODO: we need a constructor for this...
-        *table = PACKED_REGISTRY_TABLE {
+    let s = registry.size() as u32;
+    cmdq.send_gsp_command_with_payload(
+        bar,
+        PACKED_REGISTRY_TABLE {
             numEntries: GSP_REGISTRY_NUM_ENTRIES as u32,
-            size: registry.size() as u32,
+            size: s,
             entries: Default::default(),
-        };
-
-        registry.write_payload(sbuffer)
-    })
+        },
+        registry.size(),
+        |sbuffer| registry.write_payload(sbuffer),
+    )
 }
 
 impl GspCommandToGsp for GspSystemInfo {
     const FUNCTION: u32 = NV_VGPU_MSG_FUNCTION_GSP_SET_SYSTEM_INFO;
 }
+
+impl GspCommandToGspWithoutPayload for GspSystemInfo {}
+
+unsafe impl Zeroable for GspSystemInfo {}
 
 pub(crate) fn set_system_info(
     cmdq: &mut GspCmdq,
@@ -177,27 +188,33 @@ pub(crate) fn set_system_info(
     bar: &Bar0,
 ) -> Result {
     build_assert!(size_of::<GspSystemInfo>() < GSP_PAGE_SIZE);
-    cmdq.send_gsp_command::<GspSystemInfo>(bar, 0, |info, _| {
-        info.gpuPhysAddr = dev.resource_start(0)?;
-        info.gpuPhysFbAddr = dev.resource_start(1)?;
-        info.gpuPhysInstAddr = dev.resource_start(3)?;
-        info.nvDomainBusDeviceFunc = u64::from(dev.dev_id());
+    let gpu_phys_addr = dev.resource_start(0)?;
+    let gpu_phys_fb_addr = dev.resource_start(1)?;
+    let gpu_phys_inst_addr = dev.resource_start(3)?;
 
-        // Using TASK_SIZE in r535_gsp_rpc_set_system_info() seems wrong because
-        // TASK_SIZE is per-task. That's probably a design issue in GSP-RM though.
-        info.maxUserVa = (1 << 47) - 4096;
-        info.pciConfigMirrorBase = 0x088000;
-        info.pciConfigMirrorSize = 0x001000;
+    cmdq.send_gsp_command(
+        bar,
+        init!(GspSystemInfo {
+            gpuPhysAddr: gpu_phys_addr,
+            gpuPhysFbAddr: gpu_phys_fb_addr,
+            gpuPhysInstAddr: gpu_phys_inst_addr,
+            nvDomainBusDeviceFunc: u64::from(dev.dev_id()),
 
-        info.PCIDeviceID = (u32::from(dev.device_id()) << 16) | u32::from(dev.vendor_id().as_raw());
-        info.PCISubDeviceID =
-            (u32::from(dev.subsystem_device_id()) << 16) | u32::from(dev.subsystem_vendor_id());
-        info.PCIRevisionID = u32::from(dev.revision_id());
-        info.bIsPrimary = 0;
-        info.bPreserveVideoMemoryAllocations = 0;
+            // Using TASK_SIZE in r535_gsp_rpc_set_system_info() seems wrong because
+            // TASK_SIZE is per-task. That's probably a design issue in GSP-RM though.
+            maxUserVa: (1 << 47) - 4096,
+            pciConfigMirrorBase: 0x088000,
+            pciConfigMirrorSize: 0x001000,
 
-        Ok(())
-    })?;
+            PCIDeviceID: (u32::from(dev.device_id()) << 16) | u32::from(dev.vendor_id().as_raw()),
+            PCISubDeviceID: (u32::from(dev.subsystem_device_id()) << 16)
+                | u32::from(dev.subsystem_vendor_id()),
+            PCIRevisionID: u32::from(dev.revision_id()),
+            bIsPrimary: 0,
+            bPreserveVideoMemoryAllocations: 0,
+            ..Zeroable::init_zeroed()
+        }),
+    )?;
 
     Ok(())
 }
