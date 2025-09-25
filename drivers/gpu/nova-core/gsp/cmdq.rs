@@ -326,6 +326,9 @@ impl GspCmdq {
     ) -> Result<R> {
         let (driver_area, msg_header, slice_1) = wait_on(timeout, || {
             let driver_area = self.gsp_mem.driver_read_area();
+            if driver_area.0.as_flattened().len() < size_of::<GspMsgElement>() {
+                return None;
+            }
             // TODO: find an alternative to as_flattened()
             #[allow(clippy::incompatible_msrv)]
             let (msg_header_slice, slice_1) = driver_area
