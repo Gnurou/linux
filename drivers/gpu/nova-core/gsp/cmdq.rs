@@ -346,12 +346,6 @@ impl GspCmdq {
             Some((driver_area, msg_header, slice_1))
         })?;
 
-        let (cmd_slice, payload_1) = slice_1.split_at(size_of::<M>());
-        let cmd = M::from_bytes(cmd_slice).ok_or(EINVAL)?;
-        // TODO: find an alternative to as_flattened()
-        #[allow(clippy::incompatible_msrv)]
-        let payload_2 = driver_area.1.as_flattened();
-
         // Log RPC receive with message type decoding
         dev_info!(
             self.dev,
@@ -361,6 +355,21 @@ impl GspCmdq {
             decode_gsp_function(msg_header.rpc.function),
             msg_header.rpc.length,
         );
+
+        if msg_header.rpc.function != M::FUNCTION {
+            self.gsp_mem.advance_cpu_read_ptr(
+                (size_of_val(msg_header) as u32 - size_of_val(&msg_header.rpc) as u32
+                    + msg_header.rpc.length)
+                    .div_ceil(GSP_PAGE_SIZE as u32),
+            );
+            return Err(ERANGE);
+        }
+
+        let (cmd_slice, payload_1) = slice_1.split_at(size_of::<M>());
+        let cmd = M::from_bytes(cmd_slice).ok_or(EINVAL)?;
+        // TODO: find an alternative to as_flattened()
+        #[allow(clippy::incompatible_msrv)]
+        let payload_2 = driver_area.1.as_flattened();
 
         if GspCmdq::calculate_checksum(SBuffer::new_reader([
             msg_header.as_bytes(),
@@ -377,12 +386,8 @@ impl GspCmdq {
             return Err(EIO);
         }
 
-        let result = if msg_header.rpc.function == M::FUNCTION {
-            let sbuffer = SBuffer::new_reader([payload_1, payload_2]);
-            init(cmd, sbuffer)
-        } else {
-            Err(ERANGE)
-        };
+        let sbuffer = SBuffer::new_reader([payload_1, payload_2]);
+        let result = init(cmd, sbuffer);
 
         self.gsp_mem
             .advance_cpu_read_ptr(msg_header.rpc.length.div_ceil(GSP_PAGE_SIZE as u32));
