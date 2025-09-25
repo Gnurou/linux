@@ -389,8 +389,13 @@ impl GspCmdq {
         let sbuffer = SBuffer::new_reader([payload_1, payload_2]);
         let result = init(cmd, sbuffer);
 
-        self.gsp_mem
-            .advance_cpu_read_ptr(msg_header.rpc.length.div_ceil(GSP_PAGE_SIZE as u32));
+        // Err should we also consider the size of the msg header??
+        // TODO: make this a method of msg_header!
+        self.gsp_mem.advance_cpu_read_ptr(
+            (size_of_val(msg_header) as u32 - size_of_val(&msg_header.rpc) as u32
+                + msg_header.rpc.length)
+                .div_ceil(GSP_PAGE_SIZE as u32),
+        );
         result
     }
 
