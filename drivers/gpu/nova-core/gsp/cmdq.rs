@@ -152,17 +152,12 @@ impl DmaGspMem {
         let gsp_mem = unsafe { self.access() };
         let (before_rx, after_rx) = gsp_mem.gspq.msgq.data.split_at(rx);
 
-        if tx <= rx {
+        if tx < rx {
             // The area from `rx` up to the end of the ring, and from the beginning of the ring up
-            // to `tx`, minus one unit, belongs to the driver.
-            if tx == 0 {
-                let last = after_rx.len() - 1;
-                (&after_rx[..last], &before_rx[0..0])
-            } else {
-                (after_rx, &before_rx[..tx])
-            }
+            // to `tx` belongs to the driver.
+            (after_rx, &before_rx[0..tx])
         } else {
-            // The area from `rx` to `tx`, minus one unit, belongs to the driver.
+            // The area from `rx` to `tx` belongs to the driver.
             (after_rx.split_at(tx - rx).0, &before_rx[0..0])
         }
     }
