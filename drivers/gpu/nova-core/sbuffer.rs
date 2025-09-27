@@ -53,6 +53,10 @@ where
         Self::new(slices)
     }
 
+    pub(crate) fn is_empty(&self) -> bool {
+        self.cur_slice.is_none()
+    }
+
     fn new(slices: impl IntoIterator<IntoIter = I>) -> Self
     where
         I::Item: Deref<Target = [u8]>,
