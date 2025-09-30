@@ -147,33 +147,33 @@ macro_rules! quote_spanned {
         quote_spanned!(@proc $v $span $($tt)*);
     };
     (@proc $v:ident $span:ident -> $($tt:tt)*) => {
-        $v.push(::proc_macro::TokenTree::Punct(
+        $v.extend([::proc_macro::TokenTree::Punct(
                 ::proc_macro::Punct::new('-', ::proc_macro::Spacing::Joint)
-        ));
-        $v.push(::proc_macro::TokenTree::Punct(
+        )]);
+        $v.extend([::proc_macro::TokenTree::Punct(
                 ::proc_macro::Punct::new('>', ::proc_macro::Spacing::Alone)
-        ));
+        )]);
         quote_spanned!(@proc $v $span $($tt)*);
     };
     (@proc $v:ident $span:ident < $($tt:tt)*) => {
-        $v.push(::proc_macro::TokenTree::Punct(
+        $v.extend([::proc_macro::TokenTree::Punct(
                 ::proc_macro::Punct::new('<', ::proc_macro::Spacing::Alone)
-        ));
+        )]);
         quote_spanned!(@proc $v $span $($tt)*);
     };
     (@proc $v:ident $span:ident > $($tt:tt)*) => {
-        $v.push(::proc_macro::TokenTree::Punct(
+        $v.extend([::proc_macro::TokenTree::Punct(
                 ::proc_macro::Punct::new('>', ::proc_macro::Spacing::Alone)
-        ));
+        )]);
         quote_spanned!(@proc $v $span $($tt)*);
     };
     (@proc $v:ident $span:ident == $($tt:tt)*) => {
-        $v.push(::proc_macro::TokenTree::Punct(
+        $v.extend([::proc_macro::TokenTree::Punct(
                 ::proc_macro::Punct::new('=', ::proc_macro::Spacing::Joint)
-        ));
-        $v.push(::proc_macro::TokenTree::Punct(
+        )]);
+        $v.extend([::proc_macro::TokenTree::Punct(
                 ::proc_macro::Punct::new('=', ::proc_macro::Spacing::Alone)
-        ));
+        )]);
         quote_spanned!(@proc $v $span $($tt)*);
     };
     (@proc $v:ident $span:ident # $($tt:tt)*) => {
