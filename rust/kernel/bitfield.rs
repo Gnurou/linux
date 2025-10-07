@@ -204,7 +204,7 @@ macro_rules! bitfield {
     ) => {
         ::kernel::bitfield!(
             @leaf_accessor $vis $name $storage, $hi:$lo $field
-            { |f| <$into_type>::from(if f != 0 { true } else { false }) }
+            { |f| <$into_type>::from(f != 0) }
             bool $into_type => $into_type $(, $comment)?;
         );
     };
