@@ -264,7 +264,7 @@ macro_rules! bitfield {
                 _ => ::kernel::build_error!("Unsupported storage type size")
             }
         };
-        const [<$field:upper _SHIFT>]: u32 = Self::[<$field:upper _MASK>].trailing_zeros();
+        const [<$field:upper _SHIFT>]: u32 = $lo;
         );
 
         $(
