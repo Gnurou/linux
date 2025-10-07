@@ -4,7 +4,8 @@ use kernel::build_assert;
 use kernel::device;
 use kernel::pci;
 use kernel::prelude::*;
-use kernel::transmute::AsBytes;
+use kernel::time::Delta;
+use kernel::transmute::{AsBytes, FromBytes};
 
 use super::fw::commands::*;
 use super::fw::MsgFunction;
@@ -17,11 +18,11 @@ use crate::sbuffer::SBufferIter;
 struct GspInitDone {}
 unsafe impl AsBytes for GspInitDone {}
 unsafe impl FromBytes for GspInitDone {}
-impl GspMessageFromGsp for GspInitDone {
-    const FUNCTION: u32 = NV_VGPU_MSG_EVENT_GSP_INIT_DONE;
+impl MessageFromGsp for GspInitDone {
+    const FUNCTION: MsgFunction = MsgFunction::GspInitDone;
 }
 
-pub(crate) fn gsp_init_done(cmdq: &mut GspCmdq, timeout: Delta) -> Result {
+pub(crate) fn gsp_init_done(cmdq: &mut Cmdq, timeout: Delta) -> Result {
     loop {
         match cmdq.receive_msg_from_gsp::<GspInitDone, ()>(timeout, |_, _| Ok(())) {
             Ok(_) => break Ok(()),
