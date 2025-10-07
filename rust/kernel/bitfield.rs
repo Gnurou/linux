@@ -95,7 +95,7 @@ macro_rules! bitfield {
     // All rules below are helpers.
 
     // Defines the wrapper `$name` type, as well as its relevant implementations (`Debug`,
-    // `Default`, `BitOr`, and conversion to the value type) and field accessor methods.
+    // `Default`, and conversion to the value type) and field accessor methods.
     (@core $vis:vis $name:ident $storage:ty $(, $comment:literal)? { $($fields:tt)* }) => {
         $(
         #[doc=$comment]
@@ -103,14 +103,6 @@ macro_rules! bitfield {
         #[repr(transparent)]
         #[derive(Clone, Copy)]
         $vis struct $name($storage);
-
-        impl ::core::ops::BitOr for $name {
-            type Output = Self;
-
-            fn bitor(self, rhs: Self) -> Self::Output {
-                Self(self.0 | rhs.0)
-            }
-        }
 
         impl ::core::convert::From<$name> for $storage {
             fn from(val: $name) -> $storage {
