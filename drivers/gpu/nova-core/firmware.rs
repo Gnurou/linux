@@ -17,13 +17,13 @@ use crate::falcon::FalconFirmware;
 use crate::gpu;
 
 pub(crate) mod booter;
+pub(crate) mod fsp;
 pub(crate) mod fwsec;
 pub(crate) mod gsp;
 pub(crate) mod riscv;
 
 pub(crate) const FIRMWARE_VERSION: &str = "570.144";
 
-#[expect(unused)]
 pub(crate) fn elf_section<'a, 'b>(elf: &'a [u8], section_name: &'b str) -> Option<&'a [u8]> {
     // Check ELF magic
     if elf.len() < 5 || &elf[0..4] != b"\x7fELF" {
