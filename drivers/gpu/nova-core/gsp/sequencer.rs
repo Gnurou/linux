@@ -378,7 +378,7 @@ impl<'a> GspSequencer<'a> {
             //     Some(ref mut sbuf) => sbuf.read_into_kvec(GFP_KERNEL),
             //     _ => Err(EINVAL),
             // }?;
-            let cmd_data = sbuf.read_into_kvec(GFP_KERNEL)?;
+            let cmd_data = sbuf.flush_into_kvec(GFP_KERNEL)?;
             let seq_info = GspSequencerInfo { info, cmd_data };
 
             let sequencer = GspSequencer {

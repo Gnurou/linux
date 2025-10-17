@@ -44,9 +44,11 @@ impl MessageFromGsp for GspStaticConfigInfo_t {
     const FUNCTION: MsgFunction = MsgFunction::GetGspStaticInfo;
 }
 
-impl CommandToGsp for GspStaticConfigInfo_t {
+impl CommandToGspBase for GspStaticConfigInfo_t {
     const FUNCTION: MsgFunction = MsgFunction::GetGspStaticInfo;
 }
+
+impl CommandToGsp for GspStaticConfigInfo_t {}
 
 unsafe impl Zeroable for GspStaticConfigInfo_t {}
 
