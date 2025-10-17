@@ -5,6 +5,7 @@
 use core::mem::size_of;
 use kernel::alloc::flags::GFP_KERNEL;
 use kernel::device;
+use kernel::io::poll::read_poll_timeout;
 use kernel::prelude::*;
 use kernel::time::Delta;
 
@@ -13,7 +14,6 @@ use crate::falcon::{gsp::Gsp, sec2::Sec2, Falcon};
 use crate::firmware::gsp::GspFirmware;
 use crate::gsp::cmdq::{GspCmdq, GspMessageFromGsp};
 use crate::gsp::fw;
-use crate::util::wait_on;
 
 use kernel::transmute::FromBytes;
 use kernel::{dev_dbg, dev_err};
@@ -162,18 +162,13 @@ impl GspSeqCmdRunner for fw::GSP_SEQ_BUF_PAYLOAD_REG_POLL {
         sequencer.bar.try_read32(addr)?;
 
         // Poll the requested register with requested timeout.
-        // wait_on() unwraps the closure's Option<R> return value
-        // and returns a Result<R>.
-        wait_on(Delta::from_micros(timeout_us), || {
-            sequencer.bar.try_read32(addr).ok().and_then(|current| {
-                if (current & self.mask) == self.val {
-                    Some(())
-                } else {
-                    None
-                }
-            })
-        })?;
-        Ok(())
+        read_poll_timeout(
+            || sequencer.bar.try_read32(addr),
+            |current| (current & self.mask) == self.val,
+            Delta::ZERO,
+            Delta::from_micros(timeout_us),
+        )
+        .map(|_| ())
     }
 }
 
