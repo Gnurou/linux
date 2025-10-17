@@ -111,7 +111,6 @@ impl Chipset {
         }
     }
 
-    #[expect(dead_code)]
     pub(crate) fn needs_large_reserved_mem(&self) -> bool {
         match self.arch() {
             Architecture::Hopper | Architecture::Blackwell => true,

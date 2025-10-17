@@ -10,6 +10,7 @@
 //! Unlike Turing/Ampere/Ada, there is NO SEC2 (Security Engine 2) usage.
 //! FSP handles secure boot directly using FMC firmware + Chain of Trust.
 
+use kernel::io::poll::read_poll_timeout;
 use kernel::ptr::Alignable;
 use kernel::transmute::{AsBytes, FromBytes};
 use kernel::{device, prelude::*};
@@ -229,20 +230,20 @@ impl Fsp {
             initial_status
         );
 
-        crate::util::wait_on(timeout, || {
-            let status = crate::regs::read_fsp_boot_complete_status(bar, arch).ok()?;
-            dev_dbg!(
-                dev,
-                "FSP I2CS scratch register status: {:#x} (expected: {:#x})\n",
-                status,
-                FSP_BOOT_COMPLETE_STATUS_SUCCESS
-            );
-            if status == FSP_BOOT_COMPLETE_STATUS_SUCCESS {
-                Some(())
-            } else {
-                None
-            }
-        })
+        read_poll_timeout(
+            || crate::regs::read_fsp_boot_complete_status(bar, arch),
+            |&status| {
+                dev_dbg!(
+                    dev,
+                    "FSP I2CS scratch register status: {:#x} (expected: {:#x})\n",
+                    status,
+                    FSP_BOOT_COMPLETE_STATUS_SUCCESS
+                );
+                status == FSP_BOOT_COMPLETE_STATUS_SUCCESS
+            },
+            Delta::ZERO,
+            timeout,
+        )
         .map_err(|_| {
             let final_status =
                 crate::regs::read_fsp_boot_complete_status(bar, arch).unwrap_or(0xDEADBEEF);
@@ -253,6 +254,7 @@ impl Fsp {
             );
             ETIMEDOUT
         })
+        .map(|_| ())
     }
 
     /// Extract FMC firmware signatures for Chain of Trust verification.
@@ -448,7 +450,7 @@ impl Fsp {
             final_rsvd_size += crate::fb::calc_pmu_reserved_size();
 
             final_rsvd_size
-                .align_up(Alignment::new(0x200000))
+                .align_up(Alignment::new::<0x200000>())
                 .unwrap_or(final_rsvd_size)
         } else {
             0
@@ -519,14 +521,12 @@ impl Fsp {
 
         // Wait for response
         let timeout = Delta::from_millis(FSP_MSG_TIMEOUT_MS);
-        let packet_size = crate::util::wait_on(timeout, || {
-            let size = fsp_falcon.poll_msgq(bar);
-            if size > 0 {
-                Some(size)
-            } else {
-                None
-            }
-        })
+        let packet_size = read_poll_timeout(
+            || Ok(fsp_falcon.poll_msgq(bar)),
+            |&size| size > 0,
+            Delta::ZERO,
+            timeout,
+        )
         .map_err(|_| {
             dev_err!(dev, "FSP response timeout\n");
             ETIMEDOUT
