@@ -13,7 +13,7 @@ use crate::driver::Bar0;
 use crate::firmware::gsp::GspFirmware;
 use crate::gpu::Chipset;
 use crate::gsp;
-use crate::num::usize_as_u64;
+use crate::num::{usize_as_u64, FromAs};
 use crate::regs;
 
 mod hal;
@@ -157,7 +157,7 @@ impl FbLayout {
 
         let boot = {
             const BOOTLOADER_DOWN_ALIGN: Alignment = Alignment::new::<SZ_4K>();
-            let bootloader_size = gsp_fw.bootloader.ucode.size() as u64;
+            let bootloader_size = u64::from_as(gsp_fw.bootloader.ucode.size());
             let bootloader_base = (frts.start - bootloader_size).align_down(BOOTLOADER_DOWN_ALIGN);
 
             bootloader_base..bootloader_base + bootloader_size
@@ -165,7 +165,7 @@ impl FbLayout {
 
         let elf = {
             const ELF_DOWN_ALIGN: Alignment = Alignment::new::<SZ_64K>();
-            let elf_size = gsp_fw.size as u64;
+            let elf_size = u64::from_as(gsp_fw.size);
             let elf_addr = (boot.start - elf_size).align_down(ELF_DOWN_ALIGN);
 
             elf_addr..elf_addr + elf_size
@@ -182,14 +182,14 @@ impl FbLayout {
 
         let wpr2 = {
             const WPR2_DOWN_ALIGN: Alignment = Alignment::new::<SZ_1M>();
-            let wpr2_addr = (wpr2_heap.start - size_of::<gsp::GspFwWprMeta>() as u64)
+            let wpr2_addr = (wpr2_heap.start - u64::from_as(size_of::<gsp::GspFwWprMeta>()))
                 .align_down(WPR2_DOWN_ALIGN);
 
             wpr2_addr..frts.end
         };
 
         let heap = {
-            const HEAP_SIZE: u64 = SZ_1M as u64;
+            const HEAP_SIZE: u64 = usize_as_u64(SZ_1M);
 
             wpr2.start - HEAP_SIZE..wpr2.start
         };
