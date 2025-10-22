@@ -44,7 +44,7 @@ fn signature_reg_fuse_version_ga102(
 
     // Each engine has 16 ucode version registers numbered from 1 to 16.
     let ucode_idx = match ucode_id {
-        1..=NV_FUSE_OPT_FPF_SIZE => (ucode_id - 1) as usize,
+        1..=NV_FUSE_OPT_FPF_SIZE => usize::from(ucode_id - 1),
         _ => {
             dev_err!(dev, "invalid ucode id {:#x}", ucode_id);
             return Err(EINVAL);
