@@ -185,8 +185,60 @@ impl<T: RegistrationOps> PinnedDrop for Registration<T> {
 ///
 /// It is meant to be used as a helper by other subsystems so they can more easily expose their own
 /// macros.
+///
+/// # Optional `init` closure
+///
+/// You can optionally provide an `init` closure that will be executed when the module is loaded,
+/// before the driver is registered:
+///
+/// ```ignore
+/// module_driver! {
+///     <T>,
+///     pci::Adapter<T>,
+///     {
+///         type: MyDriver,
+///         init: || {
+///             pr_info!("Custom initialization\n");
+///         },
+///         name: "mydriver",
+///         // ... other fields
+///     }
+/// }
+/// ```
 #[macro_export]
 macro_rules! module_driver {
+    // Version with init closure
+    (<$gen_type:ident>, $driver_ops:ty, { type: $type:ty, init: $init_fn:expr, $($f:tt)* }) => {
+        type Ops<$gen_type> = $driver_ops;
+
+        #[$crate::prelude::pin_data]
+        struct DriverModule {
+            #[pin]
+            _driver: $crate::driver::Registration<Ops<$type>>,
+        }
+
+        impl $crate::InPlaceModule for DriverModule {
+            fn init(
+                module: &'static $crate::ThisModule
+            ) -> impl ::pin_init::PinInit<Self, $crate::error::Error> {
+                // Execute the custom initialization closure
+                ($init_fn)();
+
+                $crate::try_pin_init!(Self {
+                    _driver <- $crate::driver::Registration::new(
+                        <Self as $crate::ModuleMetadata>::NAME,
+                        module,
+                    ),
+                })
+            }
+        }
+
+        $crate::prelude::module! {
+            type: DriverModule,
+            $($f)*
+        }
+    };
+    // Version without init closure (default behavior)
     (<$gen_type:ident>, $driver_ops:ty, { type: $type:ty, $($f:tt)* }) => {
         type Ops<$gen_type> = $driver_ops;
 

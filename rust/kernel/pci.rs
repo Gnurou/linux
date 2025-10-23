@@ -114,6 +114,29 @@ impl<T: Driver + 'static> Adapter<T> {
 ///     license: "GPL v2",
 /// }
 ///```
+///
+/// With optional initialization closure:
+///
+///```ignore
+/// kernel::module_pci_driver! {
+///     type: MyDriver,
+///     init: || {
+///         pr_info!("Custom module initialization\n");
+///         // Perform one-time module setup here
+///     },
+///     name: "Module name",
+///     authors: ["Author name"],
+///     description: "Description",
+///     license: "GPL v2",
+/// }
+///```
+///
+/// The optional `init` closure will be executed once when the module is loaded,
+/// before the PCI driver is registered. This is useful for:
+/// - Initializing global state
+/// - Allocating module-wide resources
+/// - Logging initialization messages
+/// - Registering subsystem components
 #[macro_export]
 macro_rules! module_pci_driver {
 ($($f:tt)*) => {
