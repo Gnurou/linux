@@ -33,7 +33,8 @@ const RM_LOG_BUFFER_NUM_PAGES: usize = 0x10;
 #[pin_data]
 pub(crate) struct Gsp {
     pub(crate) libos: CoherentAllocation<LibosMemoryRegionInitArgument>,
-    loginit: LogBuffer,
+    #[pin]
+    pub loginit: debugfs::File<LogBuffer>,
     logintr: LogBuffer,
     logrm: LogBuffer,
     pub(crate) cmdq: Cmdq,
@@ -115,7 +116,9 @@ impl debugfs::BinaryWriter for LogBuffer {
 unsafe impl Sync for LogBuffer {}
 
 impl Gsp {
-    pub(crate) fn new(pdev: &pci::Device<device::Bound>) -> Result<impl PinInit<Self, Error>> {
+    pub(crate) fn new<'a>(
+        pdev: &'a pci::Device<device::Bound>,
+    ) -> Result<impl PinInit<Self, Error> + 'a> {
         let dev = pdev.as_ref();
         let libos = CoherentAllocation::<LibosMemoryRegionInitArgument>::alloc_coherent(
             dev,
@@ -151,9 +154,17 @@ impl Gsp {
             )
         )?;
 
+        #[allow(static_mut_refs)]
+        let debugfs_dir =
+            // SAFETY: `DEBUGFS_ROOT` is never modified after initialization, so it is safe to
+            // create a shared reference to it.
+            unsafe { crate::DEBUGFS_ROOT.as_ref() }
+            .map(|root| root.subdir(pdev.name()))
+            .ok_or(ENOENT)?;
+
         Ok(try_pin_init!(Self {
             libos,
-            loginit,
+            loginit <- debugfs_dir.read_binary_file(kernel::c_str!("loginit"), loginit),
             logintr,
             logrm,
             rmargs,
