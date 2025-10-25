@@ -2,6 +2,7 @@
 
 mod boot;
 
+use kernel::debugfs;
 use kernel::device;
 use kernel::dma::CoherentAllocation;
 use kernel::dma::DmaAddress;
@@ -96,6 +97,22 @@ impl LogBuffer {
         Ok(obj)
     }
 }
+
+impl debugfs::BinaryWriter for LogBuffer {
+    fn write_to_slice(
+        &self,
+        writer: &mut kernel::uaccess::UserSliceWriter,
+        offset: &mut kernel::fs::file::Offset,
+    ) -> Result<usize> {
+        // SAFETY: Broken. The device might very well be writing into this slice.
+        let slice = unsafe { self.0.as_slice(0, self.0.count()) }?;
+
+        writer.write_slice_file(slice, offset)
+    }
+}
+
+// SAFETY: TODO.
+unsafe impl Sync for LogBuffer {}
 
 impl Gsp {
     pub(crate) fn new(pdev: &pci::Device<device::Bound>) -> Result<impl PinInit<Self, Error>> {
