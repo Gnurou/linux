@@ -171,4 +171,10 @@ impl Gsp {
             cmdq,
         }))
     }
+
+    /// Accessor for `cmdq`.
+    pub(crate) fn cmdq(self: Pin<&mut Self>) -> &mut Cmdq {
+        // SAFETY: Ideally we want to return a pinned cmdq, but this requires modifying more code.
+        unsafe { &mut self.get_unchecked_mut().cmdq }
+    }
 }

@@ -142,8 +142,8 @@ impl super::Gsp {
             CoherentAllocation::<GspFwWprMeta>::alloc_coherent(dev, 1, GFP_KERNEL | __GFP_ZERO)?;
         dma_write!(wpr_meta[0] = GspFwWprMeta::new(&gsp_fw, &fb_layout)?)?;
 
-        set_system_info(&mut self.cmdq, pdev, bar)?;
-        build_registry(&mut self.cmdq, bar)?;
+        set_system_info(self.as_mut().cmdq(), pdev, bar)?;
+        build_registry(self.as_mut().cmdq(), bar)?;
 
         gsp_falcon.reset(bar)?;
         let libos_handle = self.libos.dma_handle();
