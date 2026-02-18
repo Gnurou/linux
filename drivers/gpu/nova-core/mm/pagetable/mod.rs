@@ -7,6 +7,7 @@
 //! - Memory aperture types for PDEs and PTEs
 
 #![expect(dead_code)]
+pub(crate) mod ver2;
 
 use crate::gpu::Architecture;
 
