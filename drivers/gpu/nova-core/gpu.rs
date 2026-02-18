@@ -4,8 +4,10 @@ use kernel::{
     device,
     devres::Devres,
     fmt,
+    gpu::buddy::GpuBuddyParams,
     pci,
     prelude::*,
+    sizes::{SZ_1M, SZ_4K},
     sync::Arc, //
 };
 
@@ -22,6 +24,7 @@ use crate::{
         commands::GetGspStaticInfoReply,
         Gsp, //
     },
+    mm::GpuMm,
     regs,
 };
 
@@ -252,6 +255,9 @@ pub(crate) struct Gpu {
     gsp_falcon: Falcon<GspFalcon>,
     /// SEC2 falcon instance, used for GSP boot up and cleanup.
     sec2_falcon: Falcon<Sec2Falcon>,
+    /// GPU memory manager owning memory management resources.
+    #[pin]
+    mm: GpuMm,
     /// GSP runtime data. Temporarily an empty placeholder.
     #[pin]
     gsp: Gsp,
@@ -285,6 +291,15 @@ impl Gpu {
             .inspect(|falcon| falcon.clear_swgen0_intr(bar))?,
 
             sec2_falcon: Falcon::new(pdev.as_ref(), spec.chipset)?,
+
+            // Create GPU memory manager owning memory management resources.
+            // This will be initialized with the usable VRAM region from GSP in a later
+            // patch. For now, we use a placeholder of 1MB.
+            mm <- GpuMm::new(devres_bar.clone(), GpuBuddyParams {
+                base_offset_bytes: 0,
+                physical_memory_size_bytes: SZ_1M as u64,
+                chunk_size_bytes: SZ_4K as u64,
+            })?,
 
             gsp <- Gsp::new(pdev),
 
