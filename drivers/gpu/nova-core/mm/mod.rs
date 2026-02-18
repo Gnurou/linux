@@ -5,6 +5,7 @@
 #![expect(dead_code)]
 
 pub(crate) mod pramin;
+pub(crate) mod tlb;
 
 use kernel::sizes::SZ_4K;
 
