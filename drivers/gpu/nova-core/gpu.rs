@@ -398,6 +398,9 @@ impl Gpu {
 
         let mmu_version = MmuVersion::from(self.spec.chipset.arch());
 
+        // PRAMIN aperture self-tests.
+        crate::mm::pramin::run_self_test(pdev.as_ref(), self.bar.clone(), mmu_version)?;
+
         // BAR1 self-tests.
         let bar1 = Arc::pin_init(
             pdev.iomap_region_sized::<BAR1_SIZE>(1, c"nova-core/bar1"),

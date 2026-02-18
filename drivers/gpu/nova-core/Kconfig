@@ -21,7 +21,7 @@ config NOVA_MM_SELFTESTS
 	depends on NOVA_CORE
 	help
 	  Enable self-tests for the memory management subsystem. When enabled,
-	  tests are run during GPU probe to verify page table walking, and BAR1
-	  virtual memory mapping functionality.
+	  tests are run during GPU probe to verify PRAMIN aperture access,
+	  page table walking, and BAR1 virtual memory mapping functionality.
 
 	  This is a testing option and is default-disabled.

@@ -291,3 +291,164 @@ impl Drop for PraminWindow<'_> {
         // MutexGuard drops automatically, releasing the lock.
     }
 }
+
+/// Run PRAMIN self-tests during boot if self-tests are enabled.
+#[cfg(CONFIG_NOVA_MM_SELFTESTS)]
+pub(crate) fn run_self_test(
+    dev: &kernel::device::Device,
+    bar: Arc<Devres<Bar0>>,
+    mmu_version: super::pagetable::MmuVersion,
+) -> Result {
+    use super::pagetable::MmuVersion;
+
+    // PRAMIN support is only for MMU v2 for now (Turing/Ampere/Ada).
+    if mmu_version != MmuVersion::V2 {
+        dev_info!(
+            dev,
+            "PRAMIN: Skipping self-tests for MMU {:?} (only V2 supported)\n",
+            mmu_version
+        );
+        return Ok(());
+    }
+
+    dev_info!(dev, "PRAMIN: Starting self-test...\n");
+
+    let pramin = Arc::pin_init(Pramin::new(bar)?, GFP_KERNEL)?;
+    let mut win = pramin.window()?;
+
+    // Use offset 0x1000 as test area.
+    let base: usize = 0x1000;
+
+    // Test 1: Read/write at byte-aligned locations.
+    for i in 0u8..4 {
+        let offset = base + 1 + usize::from(i); // Offsets 0x1001, 0x1002, 0x1003, 0x1004
+        let val = 0xA0 + i;
+        win.try_write8(offset, val)?;
+        let read_val = win.try_read8(offset)?;
+        if read_val != val {
+            dev_err!(
+                dev,
+                "PRAMIN: FAIL - offset {:#x}: wrote {:#x}, read {:#x}\n",
+                offset,
+                val,
+                read_val
+            );
+            return Err(EIO);
+        }
+    }
+
+    // Test 2: Write `u32` and read back as `u8`s.
+    let test2_offset = base + 0x10;
+    let test2_val: u32 = 0xDEADBEEF;
+    win.try_write32(test2_offset, test2_val)?;
+
+    // Read back as individual bytes (little-endian: EF BE AD DE).
+    let expected_bytes: [u8; 4] = [0xEF, 0xBE, 0xAD, 0xDE];
+    for (i, &expected) in expected_bytes.iter().enumerate() {
+        let read_val = win.try_read8(test2_offset + i)?;
+        if read_val != expected {
+            dev_err!(
+                dev,
+                "PRAMIN: FAIL - offset {:#x}: expected {:#x}, read {:#x}\n",
+                test2_offset + i,
+                expected,
+                read_val
+            );
+            return Err(EIO);
+        }
+    }
+
+    // Test 3: Window repositioning across 1MB boundaries.
+    // Write to offset > 1MB to trigger window slide, then verify.
+    let test3_offset_a: usize = base; // First 1MB region.
+    let test3_offset_b: usize = 0x200000 + base; // 2MB + base (different 1MB region).
+    let val_a: u32 = 0x11111111;
+    let val_b: u32 = 0x22222222;
+
+    // Write to first region.
+    win.try_write32(test3_offset_a, val_a)?;
+
+    // Write to second region (triggers window reposition).
+    win.try_write32(test3_offset_b, val_b)?;
+
+    // Read back from second region.
+    let read_b = win.try_read32(test3_offset_b)?;
+    if read_b != val_b {
+        dev_err!(
+            dev,
+            "PRAMIN: FAIL - offset {:#x}: expected {:#x}, read {:#x}\n",
+            test3_offset_b,
+            val_b,
+            read_b
+        );
+        return Err(EIO);
+    }
+
+    // Read back from first region (triggers window reposition again).
+    let read_a = win.try_read32(test3_offset_a)?;
+    if read_a != val_a {
+        dev_err!(
+            dev,
+            "PRAMIN: FAIL - offset {:#x}: expected {:#x}, read {:#x}\n",
+            test3_offset_a,
+            val_a,
+            read_a
+        );
+        return Err(EIO);
+    }
+
+    // Test 4: Invalid offset rejection (beyond 40-bit address space).
+    {
+        // 40-bit address space limit check.
+        let invalid_offset: usize = MAX_VRAM_OFFSET + 1;
+        let result = win.try_read32(invalid_offset);
+        if result.is_ok() {
+            dev_err!(
+                dev,
+                "PRAMIN: FAIL - read at invalid offset {:#x} should have failed\n",
+                invalid_offset
+            );
+            return Err(EIO);
+        }
+    }
+
+    // Test 5: Misaligned multi-byte access rejection.
+    // Verify that misaligned `u16`/`u32`/`u64` accesses are properly rejected.
+    {
+        // `u16` at odd offset (not 2-byte aligned).
+        let offset_u16 = base + 0x21;
+        if win.try_write16(offset_u16, 0xABCD).is_ok() {
+            dev_err!(
+                dev,
+                "PRAMIN: FAIL - misaligned u16 write at {:#x} should have failed\n",
+                offset_u16
+            );
+            return Err(EIO);
+        }
+
+        // `u32` at 2-byte-aligned (not 4-byte-aligned) offset.
+        let offset_u32 = base + 0x32;
+        if win.try_write32(offset_u32, 0x12345678).is_ok() {
+            dev_err!(
+                dev,
+                "PRAMIN: FAIL - misaligned u32 write at {:#x} should have failed\n",
+                offset_u32
+            );
+            return Err(EIO);
+        }
+
+        // `u64` read at 4-byte-aligned (not 8-byte-aligned) offset.
+        let offset_u64 = base + 0x44;
+        if win.try_read64(offset_u64).is_ok() {
+            dev_err!(
+                dev,
+                "PRAMIN: FAIL - misaligned u64 read at {:#x} should have failed\n",
+                offset_u64
+            );
+            return Err(EIO);
+        }
+    }
+
+    dev_info!(dev, "PRAMIN: All self-tests PASSED\n");
+    Ok(())
+}
