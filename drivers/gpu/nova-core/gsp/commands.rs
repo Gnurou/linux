@@ -234,7 +234,6 @@ impl GetGspStaticInfoReply {
 
     /// Returns the usable FB region `(base, size)` for driver allocation which is
     /// already retrieved from the GSP.
-    #[expect(dead_code)]
     pub(crate) fn usable_fb_region(&self) -> Option<(u64, u64)> {
         self.usable_fb_region
     }

@@ -150,7 +150,7 @@ impl super::Gsp {
 
         let gsp_fw = KBox::pin_init(GspFirmware::new(dev, chipset, FIRMWARE_VERSION), GFP_KERNEL)?;
 
-        let fb_layout = FbLayout::new(chipset, bar, &gsp_fw)?;
+        let mut fb_layout = FbLayout::new(chipset, bar, &gsp_fw)?;
         dev_dbg!(dev, "{:#x?}\n", fb_layout);
 
         Self::run_fwsec_frts(dev, gsp_falcon, bar, &bios, &fb_layout)?;
@@ -250,6 +250,11 @@ impl super::Gsp {
         match info.gpu_name() {
             Ok(name) => dev_info!(pdev.as_ref(), "GPU name: {}\n", name),
             Err(e) => dev_warn!(pdev.as_ref(), "GPU name unavailable: {:?}\n", e),
+        }
+
+        // Populate usable VRAM from GSP response.
+        if let Some((base, size)) = info.usable_fb_region() {
+            fb_layout.set_usable_vram(base, size);
         }
 
         Ok((info, fb_layout))
