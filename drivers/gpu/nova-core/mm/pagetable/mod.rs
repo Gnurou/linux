@@ -8,6 +8,7 @@
 
 #![expect(dead_code)]
 pub(crate) mod ver2;
+pub(crate) mod ver3;
 
 use crate::gpu::Architecture;
 
