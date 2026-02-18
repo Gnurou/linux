@@ -235,7 +235,6 @@ impl GetGspStaticInfoReply {
     }
 
     /// Returns the BAR1 Page Directory Entry base address.
-    #[expect(dead_code)]
     pub(crate) fn bar1_pde_base(&self) -> u64 {
         self.bar1_pde_base
     }
