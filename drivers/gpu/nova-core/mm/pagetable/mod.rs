@@ -9,6 +9,7 @@
 #![expect(dead_code)]
 pub(crate) mod ver2;
 pub(crate) mod ver3;
+pub(crate) mod walk;
 
 use kernel::prelude::*;
 
