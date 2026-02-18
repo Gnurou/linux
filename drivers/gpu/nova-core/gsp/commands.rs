@@ -189,6 +189,7 @@ impl CommandToGsp for GetGspStaticInfo {
 /// The reply from the GSP to the [`GetGspStaticInfo`] command.
 pub(crate) struct GetGspStaticInfoReply {
     gpu_name: [u8; 64],
+    bar1_pde_base: u64,
     /// First usable FB region `(base, size)` for memory allocation.
     usable_fb_region: Option<(u64, u64)>,
 }
@@ -204,6 +205,7 @@ impl MessageFromGsp for GetGspStaticInfoReply {
     ) -> Result<Self, Self::InitError> {
         Ok(GetGspStaticInfoReply {
             gpu_name: msg.gpu_name_str(),
+            bar1_pde_base: msg.bar1_pde_base(),
             usable_fb_region: msg.first_usable_fb_region(),
         })
     }
@@ -230,6 +232,12 @@ impl GetGspStaticInfoReply {
             .map_err(GpuNameError::NoNullTerminator)?
             .to_str()
             .map_err(GpuNameError::InvalidUtf8)
+    }
+
+    /// Returns the BAR1 Page Directory Entry base address.
+    #[expect(dead_code)]
+    pub(crate) fn bar1_pde_base(&self) -> u64 {
+        self.bar1_pde_base
     }
 
     /// Returns the usable FB region `(base, size)` for driver allocation which is
