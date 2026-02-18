@@ -10,6 +10,14 @@
 pub(crate) mod ver2;
 pub(crate) mod ver3;
 
+use kernel::prelude::*;
+
+use super::{
+    pramin,
+    Pfn,
+    VramAddress,
+    PAGE_SIZE, //
+};
 use crate::gpu::Architecture;
 
 /// MMU version enumeration.
@@ -74,6 +82,76 @@ impl PageTableLevel {
             Self::L4 => 4,
             Self::L5 => 5,
         }
+    }
+}
+
+impl MmuVersion {
+    /// Get the `PDE` levels (excluding PTE level) for page table walking.
+    pub(crate) fn pde_levels(&self) -> &'static [PageTableLevel] {
+        match self {
+            Self::V2 => ver2::PDE_LEVELS,
+            Self::V3 => ver3::PDE_LEVELS,
+        }
+    }
+
+    /// Get the PTE level for this MMU version.
+    pub(crate) fn pte_level(&self) -> PageTableLevel {
+        match self {
+            Self::V2 => ver2::PTE_LEVEL,
+            Self::V3 => ver3::PTE_LEVEL,
+        }
+    }
+
+    /// Get the dual PDE level (128-bit entries) for this MMU version.
+    pub(crate) fn dual_pde_level(&self) -> PageTableLevel {
+        match self {
+            Self::V2 => ver2::DUAL_PDE_LEVEL,
+            Self::V3 => ver3::DUAL_PDE_LEVEL,
+        }
+    }
+
+    /// Get the number of PDE levels for this MMU version.
+    pub(crate) fn pde_level_count(&self) -> usize {
+        self.pde_levels().len()
+    }
+
+    /// Get the entry size in bytes for a given level.
+    pub(crate) fn entry_size(&self, level: PageTableLevel) -> usize {
+        if level == self.dual_pde_level() {
+            16 // 128-bit dual PDE
+        } else {
+            8 // 64-bit PDE/PTE
+        }
+    }
+
+    /// Get the number of entries per page table page for a given level.
+    pub(crate) fn entries_per_page(&self, level: PageTableLevel) -> usize {
+        PAGE_SIZE / self.entry_size(level)
+    }
+
+    /// Compute upper bound on page table pages needed for `num_virt_pages`.
+    ///
+    /// Walks from PTE level up through PDE levels, accumulating the tree.
+    pub(crate) fn pt_pages_upper_bound(&self, num_virt_pages: usize) -> usize {
+        let mut total = 0;
+
+        // PTE pages at the leaf level.
+        let pte_epp = self.entries_per_page(self.pte_level());
+        // Ceiling of (num_virt_pages / entries_per_page).
+        let mut pages_at_level = (num_virt_pages + pte_epp - 1) / pte_epp;
+        total += pages_at_level;
+
+        // Walk PDE levels bottom-up (reverse of pde_levels()).
+        for &level in self.pde_levels().iter().rev() {
+            let epp = self.entries_per_page(level);
+            // How many pages at this level do we need to point to
+            // the previous pages_at_level?
+            // Calculated as ceiling of (pages_at_level / entries_per_page).
+            pages_at_level = (pages_at_level + epp - 1) / epp;
+            total += pages_at_level;
+        }
+
+        total
     }
 }
 
@@ -147,5 +225,254 @@ impl From<u8> for AperturePde {
 impl From<AperturePde> for u8 {
     fn from(val: AperturePde) -> Self {
         val as u8
+    }
+}
+
+/// Unified Page Table Entry wrapper for both MMU v2 and v3 `PTE`
+/// types, allowing the walker to work with either format.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Pte {
+    /// MMU v2 `PTE` (Turing/Ampere/Ada).
+    V2(ver2::Pte),
+    /// MMU v3 `PTE` (Hopper+).
+    V3(ver3::Pte),
+}
+
+impl Pte {
+    /// Create a `PTE` from a raw `u64` value for the given MMU version.
+    pub(crate) fn new(version: MmuVersion, val: u64) -> Self {
+        match version {
+            MmuVersion::V2 => Self::V2(ver2::Pte::new(val)),
+            MmuVersion::V3 => Self::V3(ver3::Pte::new(val)),
+        }
+    }
+
+    /// Create an invalid `PTE` for the given MMU version.
+    pub(crate) fn invalid(version: MmuVersion) -> Self {
+        match version {
+            MmuVersion::V2 => Self::V2(ver2::Pte::invalid()),
+            MmuVersion::V3 => Self::V3(ver3::Pte::invalid()),
+        }
+    }
+
+    /// Create a valid `PTE` for video memory.
+    pub(crate) fn new_vram(version: MmuVersion, pfn: Pfn, writable: bool) -> Self {
+        match version {
+            MmuVersion::V2 => Self::V2(ver2::Pte::new_vram(pfn, writable)),
+            MmuVersion::V3 => Self::V3(ver3::Pte::new_vram(pfn, writable)),
+        }
+    }
+
+    /// Check if this `PTE` is valid.
+    pub(crate) fn is_valid(&self) -> bool {
+        match self {
+            Self::V2(p) => p.valid(),
+            Self::V3(p) => p.valid(),
+        }
+    }
+
+    /// Get the physical frame number.
+    pub(crate) fn frame_number(&self) -> Pfn {
+        match self {
+            Self::V2(p) => p.frame_number(),
+            Self::V3(p) => p.frame_number(),
+        }
+    }
+
+    /// Get the raw `u64` value.
+    pub(crate) fn raw_u64(&self) -> u64 {
+        match self {
+            Self::V2(p) => p.raw_u64(),
+            Self::V3(p) => p.raw_u64(),
+        }
+    }
+
+    /// Read a `PTE` from VRAM.
+    pub(crate) fn read(
+        window: &mut pramin::PraminWindow<'_>,
+        addr: VramAddress,
+        mmu_version: MmuVersion,
+    ) -> Result<Self> {
+        let val = window.try_read64(addr.raw())?;
+        Ok(Self::new(mmu_version, val))
+    }
+
+    /// Write this `PTE` to VRAM.
+    pub(crate) fn write(
+        &self,
+        window: &mut pramin::PraminWindow<'_>,
+        addr: VramAddress,
+    ) -> Result {
+        window.try_write64(addr.raw(), self.raw_u64())
+    }
+}
+
+impl Default for Pte {
+    fn default() -> Self {
+        Self::V2(ver2::Pte::default())
+    }
+}
+
+/// Unified Page Directory Entry wrapper for both MMU v2 and v3 `PDE`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Pde {
+    /// MMU v2 `PDE` (Turing/Ampere/Ada).
+    V2(ver2::Pde),
+    /// MMU v3 `PDE` (Hopper+).
+    V3(ver3::Pde),
+}
+
+impl Pde {
+    /// Create a `PDE` from a raw `u64` value for the given MMU version.
+    pub(crate) fn new(version: MmuVersion, val: u64) -> Self {
+        match version {
+            MmuVersion::V2 => Self::V2(ver2::Pde::new(val)),
+            MmuVersion::V3 => Self::V3(ver3::Pde::new(val)),
+        }
+    }
+
+    /// Create a valid `PDE` pointing to a page table in video memory.
+    pub(crate) fn new_vram(version: MmuVersion, table_pfn: Pfn) -> Self {
+        match version {
+            MmuVersion::V2 => Self::V2(ver2::Pde::new_vram(table_pfn)),
+            MmuVersion::V3 => Self::V3(ver3::Pde::new_vram(table_pfn)),
+        }
+    }
+
+    /// Create an invalid `PDE` for the given MMU version.
+    pub(crate) fn invalid(version: MmuVersion) -> Self {
+        match version {
+            MmuVersion::V2 => Self::V2(ver2::Pde::invalid()),
+            MmuVersion::V3 => Self::V3(ver3::Pde::invalid()),
+        }
+    }
+
+    /// Check if this `PDE` is valid.
+    pub(crate) fn is_valid(&self) -> bool {
+        match self {
+            Self::V2(p) => p.is_valid(),
+            Self::V3(p) => p.is_valid(),
+        }
+    }
+
+    /// Get the VRAM address of the page table.
+    pub(crate) fn table_vram_address(&self) -> VramAddress {
+        match self {
+            Self::V2(p) => p.table_vram_address(),
+            Self::V3(p) => p.table_vram_address(),
+        }
+    }
+
+    /// Get the raw `u64` value.
+    pub(crate) fn raw_u64(&self) -> u64 {
+        match self {
+            Self::V2(p) => p.raw_u64(),
+            Self::V3(p) => p.raw_u64(),
+        }
+    }
+
+    /// Read a `PDE` from VRAM.
+    pub(crate) fn read(
+        window: &mut pramin::PraminWindow<'_>,
+        addr: VramAddress,
+        mmu_version: MmuVersion,
+    ) -> Result<Self> {
+        let val = window.try_read64(addr.raw())?;
+        Ok(Self::new(mmu_version, val))
+    }
+
+    /// Write this `PDE` to VRAM.
+    pub(crate) fn write(
+        &self,
+        window: &mut pramin::PraminWindow<'_>,
+        addr: VramAddress,
+    ) -> Result {
+        window.try_write64(addr.raw(), self.raw_u64())
+    }
+}
+
+impl Default for Pde {
+    fn default() -> Self {
+        Self::V2(ver2::Pde::default())
+    }
+}
+
+/// Unified Dual Page Directory Entry wrapper for both MMU v2 and v3 [`DualPde`].
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum DualPde {
+    /// MMU v2 [`DualPde`] (Turing/Ampere/Ada).
+    V2(ver2::DualPde),
+    /// MMU v3 [`DualPde`] (Hopper+).
+    V3(ver3::DualPde),
+}
+
+impl DualPde {
+    /// Create a [`DualPde`] from raw 128-bit value (two `u64`s) for the given MMU version.
+    pub(crate) fn new(version: MmuVersion, big: u64, small: u64) -> Self {
+        match version {
+            MmuVersion::V2 => Self::V2(ver2::DualPde::new(big, small)),
+            MmuVersion::V3 => Self::V3(ver3::DualPde::new(big, small)),
+        }
+    }
+
+    /// Create a [`DualPde`] with only the small page table pointer set.
+    pub(crate) fn new_small(version: MmuVersion, table_pfn: Pfn) -> Self {
+        match version {
+            MmuVersion::V2 => Self::V2(ver2::DualPde::new_small(table_pfn)),
+            MmuVersion::V3 => Self::V3(ver3::DualPde::new_small(table_pfn)),
+        }
+    }
+
+    /// Check if the small page table pointer is valid.
+    pub(crate) fn has_small(&self) -> bool {
+        match self {
+            Self::V2(d) => d.has_small(),
+            Self::V3(d) => d.has_small(),
+        }
+    }
+
+    /// Get the small page table VRAM address.
+    pub(crate) fn small_vram_address(&self) -> VramAddress {
+        match self {
+            Self::V2(d) => d.small.table_vram_address(),
+            Self::V3(d) => d.small.table_vram_address(),
+        }
+    }
+
+    /// Get the raw `u64` value of the big PDE.
+    pub(crate) fn big_raw_u64(&self) -> u64 {
+        match self {
+            Self::V2(d) => d.big.raw_u64(),
+            Self::V3(d) => d.big.raw_u64(),
+        }
+    }
+
+    /// Get the raw `u64` value of the small PDE.
+    pub(crate) fn small_raw_u64(&self) -> u64 {
+        match self {
+            Self::V2(d) => d.small.raw_u64(),
+            Self::V3(d) => d.small.raw_u64(),
+        }
+    }
+
+    /// Read a dual PDE (128-bit) from VRAM.
+    pub(crate) fn read(
+        window: &mut pramin::PraminWindow<'_>,
+        addr: VramAddress,
+        mmu_version: MmuVersion,
+    ) -> Result<Self> {
+        let lo = window.try_read64(addr.raw())?;
+        let hi = window.try_read64(addr.raw() + 8)?;
+        Ok(Self::new(mmu_version, lo, hi))
+    }
+
+    /// Write this dual PDE (128-bit) to VRAM.
+    pub(crate) fn write(
+        &self,
+        window: &mut pramin::PraminWindow<'_>,
+        addr: VramAddress,
+    ) -> Result {
+        window.try_write64(addr.raw(), self.big_raw_u64())?;
+        window.try_write64(addr.raw() + 8, self.small_raw_u64())
     }
 }
