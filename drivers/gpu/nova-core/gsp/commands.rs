@@ -186,9 +186,11 @@ impl CommandToGsp for GetGspStaticInfo {
     }
 }
 
-/// The reply from the GSP to the [`GetGspInfo`] command.
+/// The reply from the GSP to the [`GetGspStaticInfo`] command.
 pub(crate) struct GetGspStaticInfoReply {
     gpu_name: [u8; 64],
+    /// First usable FB region `(base, size)` for memory allocation.
+    usable_fb_region: Option<(u64, u64)>,
 }
 
 impl MessageFromGsp for GetGspStaticInfoReply {
@@ -202,6 +204,7 @@ impl MessageFromGsp for GetGspStaticInfoReply {
     ) -> Result<Self, Self::InitError> {
         Ok(GetGspStaticInfoReply {
             gpu_name: msg.gpu_name_str(),
+            usable_fb_region: msg.first_usable_fb_region(),
         })
     }
 }
@@ -227,6 +230,13 @@ impl GetGspStaticInfoReply {
             .map_err(GpuNameError::NoNullTerminator)?
             .to_str()
             .map_err(GpuNameError::InvalidUtf8)
+    }
+
+    /// Returns the usable FB region `(base, size)` for driver allocation which is
+    /// already retrieved from the GSP.
+    #[expect(dead_code)]
+    pub(crate) fn usable_fb_region(&self) -> Option<(u64, u64)> {
+        self.usable_fb_region
     }
 }
 
