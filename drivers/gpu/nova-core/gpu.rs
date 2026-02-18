@@ -26,7 +26,12 @@ use crate::{
         commands::GetGspStaticInfoReply,
         Gsp, //
     },
-    mm::GpuMm,
+    mm::{
+        bar_user::BarUser,
+        pagetable::MmuVersion,
+        GpuMm,
+        VramAddress, //
+    },
     regs,
 };
 
@@ -35,6 +40,7 @@ use crate::{
 struct BootParams {
     usable_vram_start: u64,
     usable_vram_size: u64,
+    bar1_pde_base: u64,
 }
 
 macro_rules! define_chipset {
@@ -272,6 +278,8 @@ pub(crate) struct Gpu {
     gsp: Gsp,
     /// Static GPU information from GSP.
     gsp_static_info: GetGspStaticInfoReply,
+    /// BAR1 user interface for CPU access to GPU virtual memory.
+    bar_user: BarUser,
 }
 
 impl Gpu {
@@ -285,6 +293,7 @@ impl Gpu {
         let boot_params: Cell<BootParams> = Cell::new(BootParams {
             usable_vram_start: 0,
             usable_vram_size: 0,
+            bar1_pde_base: 0,
         });
 
         try_pin_init!(Self {
@@ -329,6 +338,7 @@ impl Gpu {
                 boot_params.set(BootParams {
                     usable_vram_start: usable_vram.start,
                     usable_vram_size: usable_vram.end - usable_vram.start,
+                    bar1_pde_base: info.bar1_pde_base(),
                 });
 
                 info
@@ -343,6 +353,16 @@ impl Gpu {
                     physical_memory_size_bytes: params.usable_vram_size,
                     chunk_size_bytes: SZ_4K as u64,
                 })?
+            },
+
+            // Create BAR1 user interface for CPU access to GPU virtual memory.
+            // Uses the BAR1 PDE base from GSP and full BAR1 size for VA space.
+            bar_user: {
+                let params = boot_params.get();
+                let pdb_addr = VramAddress::new(params.bar1_pde_base);
+                let mmu_version = MmuVersion::from(spec.chipset.arch());
+                let bar1_size = pdev.resource_len(1)?;
+                BarUser::new(pdb_addr, mmu_version, bar1_size)?
             },
 
             bar: devres_bar,
