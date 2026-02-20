@@ -7,6 +7,7 @@ use core::convert::TryFrom;
 use kernel::{
     device,
     io::Io,
+    macros::TryFrom,
     prelude::*,
     ptr::{
         Alignable,
@@ -38,7 +39,8 @@ const BIOS_READ_AHEAD_SIZE: usize = 1024;
 const LAST_IMAGE_BIT_MASK: u8 = 0x80;
 
 /// BIOS Image Type from PCI Data Structure code_type field.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, TryFrom)]
+#[try_from(u8)]
 #[repr(u8)]
 enum BiosImageType {
     /// PC-AT compatible BIOS image (x86 legacy)
@@ -49,20 +51,6 @@ enum BiosImageType {
     Nbsi = 0x70,
     /// FwSec (Firmware Security) BIOS image
     FwSec = 0xE0,
-}
-
-impl TryFrom<u8> for BiosImageType {
-    type Error = Error;
-
-    fn try_from(code: u8) -> Result<Self> {
-        match code {
-            0x00 => Ok(Self::PciAt),
-            0x03 => Ok(Self::Efi),
-            0x70 => Ok(Self::Nbsi),
-            0xE0 => Ok(Self::FwSec),
-            _ => Err(EINVAL),
-        }
-    }
 }
 
 // PMU lookup table entry types. Used to locate PMU table entries

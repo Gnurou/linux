@@ -10,6 +10,10 @@ use core::ops::Range;
 
 use kernel::{
     dma::Coherent,
+    macros::{
+        Into,
+        TryFrom, //
+    },
     prelude::*,
     ptr::{
         Alignable,
@@ -255,7 +259,9 @@ impl GspFwWprMeta {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Into, TryFrom)]
+#[into(u32)]
+#[try_from(u32)]
 #[repr(u32)]
 pub(crate) enum MsgFunction {
     // Common function codes
@@ -291,64 +297,10 @@ pub(crate) enum MsgFunction {
     UcodeLibOsPrint = bindings::NV_VGPU_MSG_EVENT_UCODE_LIBOS_PRINT,
 }
 
-impl TryFrom<u32> for MsgFunction {
-    type Error = kernel::error::Error;
-
-    fn try_from(value: u32) -> Result<MsgFunction> {
-        match value {
-            // Common function codes
-            bindings::NV_VGPU_MSG_FUNCTION_ALLOC_CHANNEL_DMA => Ok(MsgFunction::AllocChannelDma),
-            bindings::NV_VGPU_MSG_FUNCTION_ALLOC_CTX_DMA => Ok(MsgFunction::AllocCtxDma),
-            bindings::NV_VGPU_MSG_FUNCTION_ALLOC_DEVICE => Ok(MsgFunction::AllocDevice),
-            bindings::NV_VGPU_MSG_FUNCTION_ALLOC_MEMORY => Ok(MsgFunction::AllocMemory),
-            bindings::NV_VGPU_MSG_FUNCTION_ALLOC_OBJECT => Ok(MsgFunction::AllocObject),
-            bindings::NV_VGPU_MSG_FUNCTION_ALLOC_ROOT => Ok(MsgFunction::AllocRoot),
-            bindings::NV_VGPU_MSG_FUNCTION_BIND_CTX_DMA => Ok(MsgFunction::BindCtxDma),
-            bindings::NV_VGPU_MSG_FUNCTION_CONTINUATION_RECORD => {
-                Ok(MsgFunction::ContinuationRecord)
-            }
-            bindings::NV_VGPU_MSG_FUNCTION_FREE => Ok(MsgFunction::Free),
-            bindings::NV_VGPU_MSG_FUNCTION_GET_GSP_STATIC_INFO => Ok(MsgFunction::GetGspStaticInfo),
-            bindings::NV_VGPU_MSG_FUNCTION_GET_STATIC_INFO => Ok(MsgFunction::GetStaticInfo),
-            bindings::NV_VGPU_MSG_FUNCTION_GSP_INIT_POST_OBJGPU => {
-                Ok(MsgFunction::GspInitPostObjGpu)
-            }
-            bindings::NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL => Ok(MsgFunction::GspRmControl),
-            bindings::NV_VGPU_MSG_FUNCTION_GSP_SET_SYSTEM_INFO => Ok(MsgFunction::GspSetSystemInfo),
-            bindings::NV_VGPU_MSG_FUNCTION_LOG => Ok(MsgFunction::Log),
-            bindings::NV_VGPU_MSG_FUNCTION_MAP_MEMORY => Ok(MsgFunction::MapMemory),
-            bindings::NV_VGPU_MSG_FUNCTION_NOP => Ok(MsgFunction::Nop),
-            bindings::NV_VGPU_MSG_FUNCTION_SET_GUEST_SYSTEM_INFO => {
-                Ok(MsgFunction::SetGuestSystemInfo)
-            }
-            bindings::NV_VGPU_MSG_FUNCTION_SET_REGISTRY => Ok(MsgFunction::SetRegistry),
-
-            // Event codes
-            bindings::NV_VGPU_MSG_EVENT_GSP_INIT_DONE => Ok(MsgFunction::GspInitDone),
-            bindings::NV_VGPU_MSG_EVENT_GSP_LOCKDOWN_NOTICE => Ok(MsgFunction::GspLockdownNotice),
-            bindings::NV_VGPU_MSG_EVENT_GSP_POST_NOCAT_RECORD => Ok(MsgFunction::GspPostNoCat),
-            bindings::NV_VGPU_MSG_EVENT_GSP_RUN_CPU_SEQUENCER => {
-                Ok(MsgFunction::GspRunCpuSequencer)
-            }
-            bindings::NV_VGPU_MSG_EVENT_MMU_FAULT_QUEUED => Ok(MsgFunction::MmuFaultQueued),
-            bindings::NV_VGPU_MSG_EVENT_OS_ERROR_LOG => Ok(MsgFunction::OsErrorLog),
-            bindings::NV_VGPU_MSG_EVENT_POST_EVENT => Ok(MsgFunction::PostEvent),
-            bindings::NV_VGPU_MSG_EVENT_RC_TRIGGERED => Ok(MsgFunction::RcTriggered),
-            bindings::NV_VGPU_MSG_EVENT_UCODE_LIBOS_PRINT => Ok(MsgFunction::UcodeLibOsPrint),
-            _ => Err(EINVAL),
-        }
-    }
-}
-
-impl From<MsgFunction> for u32 {
-    fn from(value: MsgFunction) -> Self {
-        // CAST: `MsgFunction` is `repr(u32)` and can thus be cast losslessly.
-        value as u32
-    }
-}
-
 /// Sequencer buffer opcode for GSP sequencer commands.
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Into, TryFrom)]
+#[into(u32)]
+#[try_from(u32)]
 #[repr(u32)]
 pub(crate) enum SeqBufOpcode {
     // Core operation opcodes
@@ -365,42 +317,6 @@ pub(crate) enum SeqBufOpcode {
     RegPoll = bindings::GSP_SEQ_BUF_OPCODE_GSP_SEQ_BUF_OPCODE_REG_POLL,
     RegStore = bindings::GSP_SEQ_BUF_OPCODE_GSP_SEQ_BUF_OPCODE_REG_STORE,
     RegWrite = bindings::GSP_SEQ_BUF_OPCODE_GSP_SEQ_BUF_OPCODE_REG_WRITE,
-}
-
-impl TryFrom<u32> for SeqBufOpcode {
-    type Error = kernel::error::Error;
-
-    fn try_from(value: u32) -> Result<SeqBufOpcode> {
-        match value {
-            bindings::GSP_SEQ_BUF_OPCODE_GSP_SEQ_BUF_OPCODE_CORE_RESET => {
-                Ok(SeqBufOpcode::CoreReset)
-            }
-            bindings::GSP_SEQ_BUF_OPCODE_GSP_SEQ_BUF_OPCODE_CORE_RESUME => {
-                Ok(SeqBufOpcode::CoreResume)
-            }
-            bindings::GSP_SEQ_BUF_OPCODE_GSP_SEQ_BUF_OPCODE_CORE_START => {
-                Ok(SeqBufOpcode::CoreStart)
-            }
-            bindings::GSP_SEQ_BUF_OPCODE_GSP_SEQ_BUF_OPCODE_CORE_WAIT_FOR_HALT => {
-                Ok(SeqBufOpcode::CoreWaitForHalt)
-            }
-            bindings::GSP_SEQ_BUF_OPCODE_GSP_SEQ_BUF_OPCODE_DELAY_US => Ok(SeqBufOpcode::DelayUs),
-            bindings::GSP_SEQ_BUF_OPCODE_GSP_SEQ_BUF_OPCODE_REG_MODIFY => {
-                Ok(SeqBufOpcode::RegModify)
-            }
-            bindings::GSP_SEQ_BUF_OPCODE_GSP_SEQ_BUF_OPCODE_REG_POLL => Ok(SeqBufOpcode::RegPoll),
-            bindings::GSP_SEQ_BUF_OPCODE_GSP_SEQ_BUF_OPCODE_REG_STORE => Ok(SeqBufOpcode::RegStore),
-            bindings::GSP_SEQ_BUF_OPCODE_GSP_SEQ_BUF_OPCODE_REG_WRITE => Ok(SeqBufOpcode::RegWrite),
-            _ => Err(EINVAL),
-        }
-    }
-}
-
-impl From<SeqBufOpcode> for u32 {
-    fn from(value: SeqBufOpcode) -> Self {
-        // CAST: `SeqBufOpcode` is `repr(u32)` and can thus be cast losslessly.
-        value as u32
-    }
 }
 
 /// Wrapper for GSP sequencer register write payload.

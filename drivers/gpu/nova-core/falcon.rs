@@ -22,13 +22,17 @@ use kernel::{
         },
         Io,
     },
+    macros::{
+        Into,
+        TryFrom, //
+    },
+    num::Bounded,
     prelude::*,
     sync::aref::ARef,
     time::Delta,
 };
 
 use crate::{
-    bounded_enum,
     driver::Bar0,
     falcon::hal::LoadMethod,
     gpu::Chipset,
@@ -46,86 +50,108 @@ pub(crate) mod sec2;
 /// Alignment (in bytes) of falcon memory blocks.
 pub(crate) const MEM_BLOCK_ALIGNMENT: usize = 256;
 
-bounded_enum! {
-    /// Revision number of a falcon core, used in the [`crate::regs::NV_PFALCON_FALCON_HWCFG1`]
-    /// register.
-    #[derive(Debug, Copy, Clone)]
-    pub(crate) enum FalconCoreRev with TryFrom<Bounded<u32, 4>> {
-        Rev1 = 1,
-        Rev2 = 2,
-        Rev3 = 3,
-        Rev4 = 4,
-        Rev5 = 5,
-        Rev6 = 6,
-        Rev7 = 7,
+/// Revision number of a falcon core, used in the [`crate::regs::NV_PFALCON_FALCON_HWCFG1`]
+/// register.
+#[derive(Debug, Copy, Clone, Into, TryFrom)]
+#[into(Bounded<u32, 4>)]
+#[try_from(Bounded<u32, 4>)]
+pub(crate) enum FalconCoreRev {
+    Rev1 = 1,
+    Rev2 = 2,
+    Rev3 = 3,
+    Rev4 = 4,
+    Rev5 = 5,
+    Rev6 = 6,
+    Rev7 = 7,
+}
+
+/// Revision subversion number of a falcon core, used in the
+/// [`crate::regs::NV_PFALCON_FALCON_HWCFG1`] register.
+#[derive(Debug, Copy, Clone, Into)]
+#[into(Bounded<u32, 2>)]
+pub(crate) enum FalconCoreRevSubversion {
+    Subversion0 = 0,
+    Subversion1 = 1,
+    Subversion2 = 2,
+    Subversion3 = 3,
+}
+
+// TODO[FPRI]: replace with `FromPrimitive`.
+impl From<Bounded<u32, 2>> for FalconCoreRevSubversion {
+    fn from(value: Bounded<u32, 2>) -> Self {
+        use FalconCoreRevSubversion::*;
+
+        match value.get() {
+            0 => Subversion0,
+            1 => Subversion1,
+            2 => Subversion2,
+            3 => Subversion3,
+            // SAFETY: `value` comes from a 2-bit `Bounded`, and we just checked all possible
+            // values.
+            _ => unsafe { core::hint::unreachable_unchecked() },
+        }
     }
 }
 
-bounded_enum! {
-    /// Revision subversion number of a falcon core, used in the
-    /// [`crate::regs::NV_PFALCON_FALCON_HWCFG1`] register.
-    #[derive(Debug, Copy, Clone)]
-    pub(crate) enum FalconCoreRevSubversion with From<Bounded<u32, 2>> {
-        Subversion0 = 0,
-        Subversion1 = 1,
-        Subversion2 = 2,
-        Subversion3 = 3,
-    }
-}
-
-bounded_enum! {
-    /// Security mode of the Falcon microprocessor.
+/// Security mode of the Falcon microprocessor.
+///
+/// See `falcon.rst` for more details.
+#[derive(Debug, Copy, Clone, Into, TryFrom)]
+#[into(Bounded<u32, 2>)]
+#[try_from(Bounded<u32, 2>)]
+pub(crate) enum FalconSecurityModel {
+    /// Non-Secure: runs unsigned code without privileges.
+    None = 0,
+    /// Light-Secured (LS): Runs signed code with some privileges.
+    /// Entry into this mode is only possible from 'Heavy-secure' mode, which verifies the code's
+    /// signature.
     ///
-    /// See `falcon.rst` for more details.
-    #[derive(Debug, Copy, Clone)]
-    pub(crate) enum FalconSecurityModel with TryFrom<Bounded<u32, 2>> {
-        /// Non-Secure: runs unsigned code without privileges.
-        None = 0,
-        /// Light-Secured (LS): Runs signed code with some privileges.
-        /// Entry into this mode is only possible from 'Heavy-secure' mode, which verifies the
-        /// code's signature.
-        ///
-        /// Also known as Low-Secure, Privilege Level 2 or PL2.
-        Light = 2,
-        /// Heavy-Secured (HS): Runs signed code with full privileges.
-        /// The code's signature is verified by the Falcon Boot ROM (BROM).
-        ///
-        /// Also known as High-Secure, Privilege Level 3 or PL3.
-        Heavy = 3,
-    }
+    /// Also known as Low-Secure, Privilege Level 2 or PL2.
+    Light = 2,
+    /// Heavy-Secured (HS): Runs signed code with full privileges.
+    /// The code's signature is verified by the Falcon Boot ROM (BROM).
+    ///
+    /// Also known as High-Secure, Privilege Level 3 or PL3.
+    Heavy = 3,
 }
 
-bounded_enum! {
-    /// Signing algorithm for a given firmware, used in the
-    /// [`crate::regs::NV_PFALCON2_FALCON_MOD_SEL`] register. It is passed to the Falcon Boot ROM
-    /// (BROM) as a parameter.
-    #[derive(Debug, Copy, Clone)]
-    pub(crate) enum FalconModSelAlgo with TryFrom<Bounded<u32, 8>> {
-        /// AES.
-        Aes = 0,
-        /// RSA3K.
-        Rsa3k = 1,
-    }
+/// Signing algorithm for a given firmware, used in the [`crate::regs::NV_PFALCON2_FALCON_MOD_SEL`]
+/// register. It is passed to the Falcon Boot ROM (BROM) as a parameter.
+#[derive(Debug, Copy, Clone, Into, TryFrom)]
+#[into(Bounded<u32, 8>)]
+#[try_from(Bounded<u32, 8>)]
+pub(crate) enum FalconModSelAlgo {
+    /// AES.
+    Aes = 0,
+    /// RSA3K.
+    Rsa3k = 1,
 }
 
-bounded_enum! {
-    /// Valid values for the `size` field of the [`crate::regs::NV_PFALCON_FALCON_DMATRFCMD`]
-    /// register.
-    #[derive(Debug, Copy, Clone)]
-    pub(crate) enum DmaTrfCmdSize with TryFrom<Bounded<u32, 3>> {
-        /// 256 bytes transfer.
-        Size256B = 0x6,
-    }
+/// Valid values for the `size` field of the [`crate::regs::NV_PFALCON_FALCON_DMATRFCMD`] register.
+#[derive(Debug, Copy, Clone, Into, TryFrom)]
+#[into(Bounded<u32, 3>)]
+#[try_from(Bounded<u32, 3>)]
+pub(crate) enum DmaTrfCmdSize {
+    /// 256 bytes transfer.
+    Size256B = 0x6,
 }
 
-bounded_enum! {
-    /// Currently active core on a dual falcon/riscv (Peregrine) controller.
-    #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-    pub(crate) enum PeregrineCoreSelect with From<Bounded<u32, 1>> {
-        /// Falcon core is active.
-        Falcon = 0,
-        /// RISC-V core is active.
-        Riscv = 1,
+/// Currently active core on a dual falcon/riscv (Peregrine) controller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Into)]
+#[into(Bounded<u32, 1>)]
+pub(crate) enum PeregrineCoreSelect {
+    /// Falcon core is active.
+    Falcon = 0,
+    /// RISC-V core is active.
+    Riscv = 1,
+}
+
+impl From<Bounded<u32, 1>> for PeregrineCoreSelect {
+    fn from(value: Bounded<u32, 1>) -> Self {
+        match bool::from(value) {
+            false => PeregrineCoreSelect::Falcon,
+            true => PeregrineCoreSelect::Riscv,
+        }
     }
 }
 
@@ -141,29 +167,38 @@ pub(crate) enum FalconMem {
     Dmem,
 }
 
-bounded_enum! {
-    /// Defines the Framebuffer Interface (FBIF) aperture type.
-    /// This determines the memory type for external memory access during a DMA transfer, which is
-    /// performed by the Falcon's Framebuffer DMA (FBDMA) engine. See falcon.rst for more details.
-    #[derive(Debug, Copy, Clone)]
-    pub(crate) enum FalconFbifTarget with TryFrom<Bounded<u32, 2>> {
-        /// Local Framebuffer (GPU's VRAM memory).
-        LocalFb = 0,
-        /// Coherent system memory (System DRAM).
-        CoherentSysmem = 1,
-        /// Non-coherent system memory (System DRAM).
-        NoncoherentSysmem = 2,
-    }
+/// Defines the Framebuffer Interface (FBIF) aperture type.
+/// This determines the memory type for external memory access during a DMA transfer, which is
+/// performed by the Falcon's Framebuffer DMA (FBDMA) engine. See falcon.rst for more details.
+#[derive(Debug, Clone, Into, TryFrom)]
+#[into(Bounded<u32, 2>)]
+#[try_from(Bounded<u32, 2>)]
+pub(crate) enum FalconFbifTarget {
+    /// Local Framebuffer (GPU's VRAM memory).
+    LocalFb = 0,
+    /// Coherent system memory (System DRAM).
+    CoherentSysmem = 1,
+    /// Non-coherent system memory (System DRAM).
+    NoncoherentSysmem = 2,
 }
 
-bounded_enum! {
-    /// Type of memory addresses to use.
-    #[derive(Debug, Copy, Clone)]
-    pub(crate) enum FalconFbifMemType with From<Bounded<u32, 1>> {
-        /// Virtual memory addresses.
-        Virtual = 0,
-        /// Physical memory addresses.
-        Physical = 1,
+/// Type of memory addresses to use.
+#[derive(Debug, Clone, Into, TryFrom)]
+#[into(Bounded<u32, 1>)]
+pub(crate) enum FalconFbifMemType {
+    /// Virtual memory addresses.
+    Virtual = 0,
+    /// Physical memory addresses.
+    Physical = 1,
+}
+
+/// Conversion from a single-bit register field.
+impl From<Bounded<u32, 1>> for FalconFbifMemType {
+    fn from(value: Bounded<u32, 1>) -> Self {
+        match bool::from(value) {
+            false => Self::Virtual,
+            true => Self::Physical,
+        }
     }
 }
 

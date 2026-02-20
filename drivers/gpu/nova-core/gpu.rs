@@ -5,6 +5,10 @@ use kernel::{
     devres::Devres,
     fmt,
     io::Io,
+    macros::{
+        Into,
+        TryFrom, //
+    },
     num::Bounded,
     pci,
     prelude::*,
@@ -12,7 +16,6 @@ use kernel::{
 };
 
 use crate::{
-    bounded_enum,
     driver::Bar0,
     falcon::{
         gsp::Gsp as GspFalcon,
@@ -29,7 +32,8 @@ macro_rules! define_chipset {
     ({ $($variant:ident = $value:expr),* $(,)* }) =>
     {
         /// Enum representation of the GPU chipset.
-        #[derive(fmt::Debug, Copy, Clone, PartialOrd, Ord, PartialEq, Eq)]
+        #[derive(fmt::Debug, Copy, Clone, PartialOrd, Ord, PartialEq, Eq, TryFrom)]
+        #[try_from(u32)]
         pub(crate) enum Chipset {
             $($variant = $value),*,
         }
@@ -56,18 +60,6 @@ macro_rules! define_chipset {
                 }
             }
             );
-        }
-
-        // TODO[FPRI]: replace with something like derive(FromPrimitive)
-        impl TryFrom<u32> for Chipset {
-            type Error = kernel::error::Error;
-
-            fn try_from(value: u32) -> Result<Self, Self::Error> {
-                match value {
-                    $( $value => Ok(Chipset::$variant), )*
-                    _ => Err(ENODEV),
-                }
-            }
         }
     }
 }
@@ -131,14 +123,15 @@ impl fmt::Display for Chipset {
     }
 }
 
-bounded_enum! {
-    /// Enum representation of the GPU generation.
-    #[derive(fmt::Debug, Copy, Clone)]
-    pub(crate) enum Architecture with TryFrom<Bounded<u32, 6>> {
-        Turing = 0x16,
-        Ampere = 0x17,
-        Ada = 0x19,
-    }
+/// Enum representation of the GPU generation.
+#[derive(fmt::Debug, Copy, Clone, Into, TryFrom)]
+#[into(Bounded<u32, 6>)]
+#[try_from(Bounded<u32, 6>)]
+#[repr(u8)]
+pub(crate) enum Architecture {
+    Turing = 0x16,
+    Ampere = 0x17,
+    Ada = 0x19,
 }
 
 pub(crate) struct Revision {
