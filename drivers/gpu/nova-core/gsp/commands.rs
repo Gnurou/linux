@@ -432,9 +432,7 @@ mod tests {
         }
     }
 
-    const MAX_CMD_SIZE: usize = SplitState::<TestPayload>::MAX_CMD_SIZE;
-
-    fn read_payload(cmd: &impl CommandToGsp) -> Result<KVVec<u8>> {
+    fn read_payload(cmd: impl CommandToGsp) -> Result<KVVec<u8>> {
         let len = cmd.variable_payload_len();
         let mut buf = KVVec::from_elem(0u8, len, GFP_KERNEL)?;
         let mut sbuf = SBufferIter::new_writer([buf.as_mut_slice(), &mut []]);
@@ -450,18 +448,24 @@ mod tests {
 
     fn check_split(t: SplitTest) -> Result {
         let payload = TestPayload::new(t.payload_size)?;
-        let mut state = SplitState::new(&payload)?;
-
-        let mut buf = read_payload(&state.command(payload))?;
-        assert!(buf.len() <= MAX_CMD_SIZE);
-
         let mut num_continuations = 0;
-        while let Some(cont) = state.next_continuation_record() {
-            let payload = read_payload(&cont)?;
-            assert!(payload.len() <= MAX_CMD_SIZE);
-            buf.extend_from_slice(&payload, GFP_KERNEL)?;
-            num_continuations += 1;
-        }
+
+        let buf = match SplitState::new(payload)? {
+            SplitState::Single(cmd) => read_payload(cmd)?,
+            SplitState::Split(cmd, mut continuations) => {
+                let mut buf = read_payload(cmd)?;
+                assert!(buf.len() <= MAX_CMD_SIZE);
+
+                while let Some(cont) = continuations.next() {
+                    let payload = read_payload(cont)?;
+                    assert!(payload.len() <= MAX_CMD_SIZE);
+                    buf.extend_from_slice(&payload, GFP_KERNEL)?;
+                    num_continuations += 1;
+                }
+
+                buf
+            }
+        };
 
         assert_eq!(num_continuations, t.num_continuations);
         assert_eq!(
