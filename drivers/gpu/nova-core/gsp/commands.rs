@@ -4,7 +4,6 @@ use core::{
     array,
     convert::Infallible,
     ffi::FromBytesUntilNulError,
-    marker::PhantomData,
     str::Utf8Error, //
 };
 
@@ -247,8 +246,37 @@ pub(crate) fn get_gsp_info(cmdq: &mut Cmdq, bar: &Bar0) -> Result<GetGspStaticIn
     }
 }
 
+pub(super) struct ContinuationRecords {
+    payload: KVVec<u8>,
+    offset: usize,
+}
+
+/// Maximum command size that fits in a single queue element.
+const MAX_CMD_SIZE: usize = GSP_MSG_QUEUE_ELEMENT_SIZE_MAX - size_of::<GspMsgElement>();
+
+impl ContinuationRecords {
+    pub(super) fn new(payload: KVVec<u8>) -> Self {
+        Self { payload, offset: 0 }
+    }
+
+    pub(super) fn next(&mut self) -> Option<ContinuationRecord<'_>> {
+        let remaining = self.payload.len() - self.offset;
+
+        if remaining > 0 {
+            let chunk_size = remaining.min(MAX_CMD_SIZE);
+            let record =
+                ContinuationRecord::new(&self.payload[self.offset..(self.offset + chunk_size)]);
+
+            self.offset += chunk_size;
+            Some(record)
+        } else {
+            None
+        }
+    }
+}
+
 /// The `ContinuationRecord` command.
-pub(crate) struct ContinuationRecord<'a> {
+pub(super) struct ContinuationRecord<'a> {
     data: &'a [u8],
 }
 
@@ -280,107 +308,81 @@ impl<'a> CommandToGsp for ContinuationRecord<'a> {
     }
 }
 
-/// Wrapper that splits a command across continuation records if needed.
-pub(crate) struct SplitState<C: CommandToGsp> {
-    state: Option<(KVVec<u8>, usize)>,
-    _phantom: PhantomData<C>,
+/// Whether a command needs to be split or not.
+pub(super) enum SplitState<C: CommandToGsp> {
+    Single(C),
+    Split(SplitCommand<C>, ContinuationRecords),
 }
 
 impl<C: CommandToGsp> SplitState<C> {
-    /// Maximum command size that fits in a single queue element.
-    const MAX_CMD_SIZE: usize = GSP_MSG_QUEUE_ELEMENT_SIZE_MAX - size_of::<GspMsgElement>();
-
-    /// Maximum size of the variable payload that can be sent in the main command.
-    const MAX_FIRST_PAYLOAD_SIZE: usize = Self::MAX_CMD_SIZE - size_of::<C::Command>();
-
     /// Creates a new `SplitState` for the given command.
     ///
     /// If the command is too large, it will be split into a main command and some number of
     /// continuation records.
-    pub(crate) fn new(inner: &C) -> Result<Self> {
-        if command_size(inner) > Self::MAX_CMD_SIZE {
-            let mut staging =
-                KVVec::<u8>::from_elem(0u8, inner.variable_payload_len(), GFP_KERNEL)?;
-            let mut sbuffer = SBufferIter::new_writer([staging.as_mut_slice(), &mut []]);
-            inner.init_variable_payload(&mut sbuffer)?;
+    pub(super) fn new(command: C) -> Result<Self> {
+        let payload_len = command.variable_payload_len();
+
+        if command_size(&command) > MAX_CMD_SIZE {
+            let max_first_payload = MAX_CMD_SIZE - size_of::<C::Command>();
+            let mut command_payload =
+                KVVec::<u8>::from_elem(0u8, payload_len.min(max_first_payload), GFP_KERNEL)?;
+            let mut continuation_payload = KVVec::<u8>::from_elem(
+                0u8,
+                payload_len.saturating_sub(command_payload.len()),
+                GFP_KERNEL,
+            )?;
+            let mut sbuffer = SBufferIter::new_writer([
+                command_payload.as_mut_slice(),
+                continuation_payload.as_mut_slice(),
+            ]);
+
+            command.init_variable_payload(&mut sbuffer)?;
             if !sbuffer.is_empty() {
                 return Err(EIO);
             }
             drop(sbuffer);
 
-            Ok(Self {
-                state: Some((staging, Self::MAX_FIRST_PAYLOAD_SIZE)),
-                _phantom: PhantomData,
-            })
+            Ok(Self::Split(
+                SplitCommand::new(command, command_payload),
+                ContinuationRecords::new(continuation_payload),
+            ))
         } else {
-            Ok(Self {
-                state: None,
-                _phantom: PhantomData,
-            })
-        }
-    }
-
-    /// Returns the main command.
-    pub(crate) fn command(&self, inner: C) -> SplitCommand<'_, C> {
-        if let Some((staging, _)) = &self.state {
-            SplitCommand::Split(inner, staging)
-        } else {
-            SplitCommand::Single(inner)
-        }
-    }
-
-    /// Returns the next continuation record, or `None` if there are no more.
-    pub(crate) fn next_continuation_record(&mut self) -> Option<ContinuationRecord<'_>> {
-        let (staging, offset) = self.state.as_mut()?;
-
-        let remaining = staging.len() - *offset;
-        if remaining > 0 {
-            let chunk_size = remaining.min(Self::MAX_CMD_SIZE);
-            let record = ContinuationRecord::new(&staging[*offset..(*offset + chunk_size)]);
-            *offset += chunk_size;
-            Some(record)
-        } else {
-            None
+            Ok(Self::Single(command))
         }
     }
 }
 
-/// Wrapper enum that represents either a single command or a split command with its staging buffer.
-pub(crate) enum SplitCommand<'a, C: CommandToGsp> {
-    /// A command that fits in a single queue element.
-    Single(C),
-    /// A command split across continuation records, with its full payload in a staging buffer.
-    Split(C, &'a [u8]),
+/// A command that has been truncated to maximum accepted length of the command queue.
+///
+/// The remainder of its payload is expected to be send using [`ContinuationRecords`].
+pub(super) struct SplitCommand<C: CommandToGsp> {
+    command: C,
+    payload: KVVec<u8>,
 }
 
-impl<'a, C: CommandToGsp> CommandToGsp for SplitCommand<'a, C> {
+impl<C: CommandToGsp> SplitCommand<C> {
+    pub(super) fn new(command: C, payload: KVVec<u8>) -> Self {
+        Self { command, payload }
+    }
+}
+
+impl<C: CommandToGsp> CommandToGsp for SplitCommand<C> {
     const FUNCTION: MsgFunction = C::FUNCTION;
     type Command = C::Command;
     type InitError = C::InitError;
 
     fn init(&self) -> impl Init<Self::Command, Self::InitError> {
-        match self {
-            SplitCommand::Single(cmd) => cmd.init(),
-            SplitCommand::Split(cmd, _) => cmd.init(),
-        }
+        self.command.init()
     }
 
     fn variable_payload_len(&self) -> usize {
-        match self {
-            SplitCommand::Single(cmd) => cmd.variable_payload_len(),
-            SplitCommand::Split(_, _) => SplitState::<C>::MAX_FIRST_PAYLOAD_SIZE,
-        }
+        self.payload.len()
     }
 
     fn init_variable_payload(
         &self,
         dst: &mut SBufferIter<core::array::IntoIter<&mut [u8], 2>>,
     ) -> Result {
-        match self {
-            SplitCommand::Single(cmd) => cmd.init_variable_payload(dst),
-            SplitCommand::Split(_, staging) => {
-                dst.write_all(&staging[..self.variable_payload_len()])
-            }
-        }
+        dst.write_all(&self.payload)
     }
 }

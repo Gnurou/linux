@@ -608,21 +608,19 @@ impl Cmdq {
         M: CommandToGsp,
         Error: From<M::InitError>,
     {
-        let mut state = SplitState::new(&command)?;
+        match SplitState::new(command)? {
+            SplitState::Single(command) => self.send_single_command(bar, command),
+            SplitState::Split(command, mut continuation) => {
+                self.send_single_command(bar, command)?;
 
-        self.send_single_command(bar, state.command(command))?;
+                while let Some(continuation) = continuation.next() {
+                    // Turbofish needed because the compiler cannot infer M here.
+                    self.send_single_command::<ContinuationRecord<'_>>(bar, continuation)?;
+                }
 
-        while let Some(continuation) = state.next_continuation_record() {
-            dev_dbg!(
-                &self.dev,
-                "GSP RPC: send continuation: size=0x{:x}\n",
-                command_size(&continuation),
-            );
-            // Turbofish needed because the compiler cannot infer M here.
-            self.send_single_command::<ContinuationRecord<'_>>(bar, continuation)?;
+                Ok(())
+            }
         }
-
-        Ok(())
     }
 
     /// Wait for a message to become available on the message queue.
