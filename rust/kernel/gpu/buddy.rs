@@ -284,19 +284,19 @@ crate::impl_flags!(
     /// These flags can be combined with any [`GpuBuddyAllocMode`] to control
     /// additional allocation behavior.
     #[derive(Clone, Copy, Default, PartialEq, Eq)]
-    pub struct GpuBuddyAllocFlags(u32);
+    pub struct GpuBuddyAllocFlags(usize);
 
     /// Individual modifier flag for GPU buddy allocation.
     #[derive(Clone, Copy, PartialEq, Eq)]
     pub enum GpuBuddyAllocFlag {
         /// Allocate physically contiguous blocks.
-        Contiguous = bindings::GPU_BUDDY_CONTIGUOUS_ALLOCATION as u32,
+        Contiguous = bindings::GPU_BUDDY_CONTIGUOUS_ALLOCATION,
 
         /// Request allocation from cleared (zeroed) memory.
-        Clear = bindings::GPU_BUDDY_CLEAR_ALLOCATION as u32,
+        Clear = bindings::GPU_BUDDY_CLEAR_ALLOCATION,
 
         /// Disable trimming of partially used blocks.
-        TrimDisable = bindings::GPU_BUDDY_TRIM_DISABLE as u32,
+        TrimDisable = bindings::GPU_BUDDY_TRIM_DISABLE,
     }
 );
 
@@ -454,7 +454,7 @@ impl GpuBuddy {
         let buddy_arc = Arc::clone(&self.0);
         let (start, end) = mode.range();
         let mode_flags = mode.into_flags();
-        let modifier_flags = u32::from(flags.into()) as usize;
+        let modifier_flags = flags.into();
 
         // Create pin-initializer that initializes list and allocates blocks.
         try_pin_init!(AllocatedBlocks {
@@ -481,7 +481,7 @@ impl GpuBuddy {
                         size,
                         min_block_size.as_usize() as u64,
                         list.as_raw(),
-                        mode_flags | modifier_flags,
+                        mode_flags | usize::from(modifier_flags),
                     )
                 })?
             }
