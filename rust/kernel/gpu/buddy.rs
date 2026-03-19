@@ -120,7 +120,7 @@
 //! // Create fragmentation by allocating 4MB blocks at [0,4M) and [8M,12M).
 //! let frag1 = KBox::pin_init(
 //!     buddy.alloc_blocks(
-//!         GpuBuddyAllocMode::Range { start: 0, end: SZ_4M as u64 },
+//!         GpuBuddyAllocMode::Range(0..SZ_4M as u64),
 //!         SZ_4M as u64,
 //!         Alignment::new::<SZ_4M>(),
 //!         GpuBuddyAllocFlags::default(),
@@ -131,10 +131,7 @@
 //!
 //! let frag2 = KBox::pin_init(
 //!     buddy.alloc_blocks(
-//!         GpuBuddyAllocMode::Range {
-//!             start: SZ_8M as u64,
-//!             end: (SZ_8M + SZ_4M) as u64,
-//!         },
+//!         GpuBuddyAllocMode::Range(SZ_8M as u64..(SZ_8M + SZ_4M) as u64),
 //!         SZ_4M as u64,
 //!         Alignment::new::<SZ_4M>(),
 //!         GpuBuddyAllocFlags::default(),
@@ -146,7 +143,7 @@
 //! // Allocate 8MB, this returns 2 blocks from the holes.
 //! let fragmented = KBox::pin_init(
 //!     buddy.alloc_blocks(
-//!         GpuBuddyAllocMode::Range { start: 0, end: SZ_16M as u64 },
+//!         GpuBuddyAllocMode::Range(0..SZ_16M as u64),
 //!         SZ_8M as u64,
 //!         Alignment::new::<SZ_4M>(),
 //!         GpuBuddyAllocFlags::default(),
@@ -186,7 +183,7 @@
 //!
 //! let _hole1 = KBox::pin_init(
 //!     small.alloc_blocks(
-//!         GpuBuddyAllocMode::Range { start: 0, end: SZ_4M as u64 },
+//!         GpuBuddyAllocMode::Range(0..SZ_4M as u64),
 //!         SZ_4M as u64,
 //!         Alignment::new::<SZ_4M>(),
 //!         GpuBuddyAllocFlags::default(),
@@ -196,10 +193,7 @@
 //!
 //! let _hole2 = KBox::pin_init(
 //!     small.alloc_blocks(
-//!         GpuBuddyAllocMode::Range {
-//!             start: SZ_8M as u64,
-//!             end: (SZ_8M + SZ_4M) as u64,
-//!         },
+//!         GpuBuddyAllocMode::Range(SZ_8M as u64..(SZ_8M + SZ_4M) as u64),
 //!         SZ_4M as u64,
 //!         Alignment::new::<SZ_4M>(),
 //!         GpuBuddyAllocFlags::default(),
@@ -220,6 +214,8 @@
 //! assert!(result.is_err());
 //! # Ok::<(), Error>(())
 //! ```
+
+use core::ops::Range;
 
 use crate::{
     bindings,
@@ -244,24 +240,19 @@ use crate::{
 ///
 /// Orthogonal modifier flags (e.g., contiguous, clear) are specified separately
 /// via [`GpuBuddyAllocFlags`].
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GpuBuddyAllocMode {
     /// Simple allocation without constraints.
     Simple,
     /// Range-based allocation between `start` and `end` addresses.
-    Range {
-        /// Start of the allocation range.
-        start: u64,
-        /// End of the allocation range.
-        end: u64,
-    },
+    Range(Range<u64>),
     /// Allocate from top of address space downward.
     TopDown,
 }
 
 impl GpuBuddyAllocMode {
     // Returns the C flags corresponding to the allocation mode.
-    fn into_flags(self) -> usize {
+    fn as_flags(&self) -> usize {
         match self {
             Self::Simple => 0,
             Self::Range { .. } => bindings::GPU_BUDDY_RANGE_ALLOCATION,
@@ -270,9 +261,9 @@ impl GpuBuddyAllocMode {
     }
 
     // Extracts the range start/end, defaulting to (0, 0) for non-range modes.
-    fn range(self) -> (u64, u64) {
+    fn range(&self) -> (u64, u64) {
         match self {
-            Self::Range { start, end } => (start, end),
+            Self::Range(range) => (range.start, range.end),
             _ => (0, 0),
         }
     }
@@ -453,7 +444,7 @@ impl GpuBuddy {
     ) -> impl PinInit<AllocatedBlocks, Error> {
         let buddy_arc = Arc::clone(&self.0);
         let (start, end) = mode.range();
-        let mode_flags = mode.into_flags();
+        let mode_flags = mode.as_flags();
         let modifier_flags = flags.into();
 
         // Create pin-initializer that initializes list and allocates blocks.
@@ -462,8 +453,8 @@ impl GpuBuddy {
             list <- CListHead::new(),
             _: {
                 // Reject zero-sized or inverted ranges.
-                if let GpuBuddyAllocMode::Range { start, end } = mode {
-                    if end <= start {
+                if let GpuBuddyAllocMode::Range(range) = mode {
+                    if range.is_empty() {
                         Err::<(), Error>(EINVAL)?;
                     }
                 }
