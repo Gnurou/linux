@@ -20,7 +20,6 @@ mod firmware;
 mod gfw;
 mod gpu;
 mod gsp;
-#[macro_use]
 mod num;
 mod regs;
 mod sbuffer;
