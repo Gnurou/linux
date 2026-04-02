@@ -5,6 +5,9 @@
 # Similarly, buddy must come first since it is used by other drivers.
 obj-$(CONFIG_GPU_BUDDY)	+= buddy.o
 obj-y			+= host1x/ drm/ vga/ tests/
+
+# nova-drm depends on nova-core's .rmeta for compilation
+$(obj)/drm: | $(obj)/nova-core
 obj-$(CONFIG_IMX_IPUV3_CORE)	+= ipu-v3/
 obj-$(CONFIG_TRACE_GPU_MEM)		+= trace/
 obj-$(CONFIG_NOVA_CORE)		+= nova-core/
