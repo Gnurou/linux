@@ -35,10 +35,8 @@ pub(crate) struct FmcSignatures {
 
 pub(crate) struct FspFirmware {
     /// FMC firmware image data (only the "image" ELF section).
-    #[expect(unused)]
     pub(crate) fmc_image: Coherent<[u8]>,
     /// FMC firmware signatures.
-    #[expect(unused)]
     pub(crate) fmc_sigs: KBox<FmcSignatures>,
 }
 

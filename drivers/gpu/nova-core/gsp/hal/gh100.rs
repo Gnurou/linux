@@ -21,7 +21,10 @@ use crate::{
         fsp::FspFirmware,
         FIRMWARE_VERSION, //
     },
-    fsp::Fsp,
+    fsp::{
+        FmcBootArgs,
+        Fsp, //
+    },
     gpu::Chipset,
     gsp::{
         boot::BootUnloadGuard,
@@ -40,19 +43,30 @@ impl GspHal for Gh100 {
     /// the GSP boot internally - no manual GSP reset/boot is needed.
     fn boot<'a>(
         &self,
-        _gsp: &'a Gsp,
+        gsp: &'a Gsp,
         dev: &'a device::Device<device::Bound>,
         bar: &'a Bar0,
         chipset: Chipset,
-        _fb_layout: &FbLayout,
-        _wpr_meta: &Coherent<GspFwWprMeta>,
+        fb_layout: &FbLayout,
+        wpr_meta: &Coherent<GspFwWprMeta>,
         _gsp_falcon: &'a Falcon<GspEngine>,
         _sec2_falcon: &'a Falcon<Sec2>,
     ) -> Result<BootUnloadGuard<'a>> {
-        let _fsp_falcon = Falcon::<FspEngine>::new(dev, chipset)?;
-        let _fsp_fw = FspFirmware::new(dev, chipset, FIRMWARE_VERSION)?;
+        let fsp_falcon = Falcon::<FspEngine>::new(dev, chipset)?;
+        let fsp_fw = FspFirmware::new(dev, chipset, FIRMWARE_VERSION)?;
 
         Fsp::wait_secure_boot(dev, bar, chipset)?;
+
+        let args = FmcBootArgs::new(
+            dev,
+            chipset,
+            &fsp_fw,
+            wpr_meta.dma_handle(),
+            gsp.libos.dma_handle(),
+            false,
+        )?;
+
+        Fsp::boot_fmc(dev, bar, fb_layout, &fsp_falcon, &args)?;
 
         Err(ENOTSUPP)
     }
