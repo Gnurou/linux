@@ -1,24 +1,16 @@
 // SPDX-License-Identifier: GPL-2.0
-// SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
-use kernel::{
-    io::Io,
-    prelude::*, //
-};
+use kernel::prelude::*;
 
 use crate::{
     driver::Bar0,
-    fb::hal::FbHal,
-    regs, //
+    fb::hal::FbHal, //
 };
 
-pub(super) fn vidmem_size_ga102(bar: &Bar0) -> u64 {
-    bar.read(regs::NV_USABLE_FB_SIZE_IN_MB).usable_fb_size()
-}
+struct Gh100;
 
-struct Ga102;
-
-impl FbHal for Ga102 {
+impl FbHal for Gh100 {
     fn read_sysmem_flush_page(&self, bar: &Bar0) -> u64 {
         super::ga100::read_sysmem_flush_page_ga100(bar)
     }
@@ -34,7 +26,7 @@ impl FbHal for Ga102 {
     }
 
     fn vidmem_size(&self, bar: &Bar0) -> u64 {
-        vidmem_size_ga102(bar)
+        super::ga102::vidmem_size_ga102(bar)
     }
 
     fn pmu_reserved_size(&self) -> u32 {
@@ -46,5 +38,5 @@ impl FbHal for Ga102 {
     }
 }
 
-const GA102: Ga102 = Ga102;
-pub(super) const GA102_HAL: &dyn FbHal = &GA102;
+const GH100: Gh100 = Gh100;
+pub(super) const GH100_HAL: &dyn FbHal = &GH100;
