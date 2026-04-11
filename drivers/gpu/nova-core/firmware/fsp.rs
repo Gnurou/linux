@@ -15,13 +15,31 @@ use crate::{
     gpu::Chipset, //
 };
 
+/// Size of the FSP SHA-384 hash, in bytes.
+pub(crate) const FSP_HASH_SIZE: usize = 48;
+/// Size of the RSA-3072 public key, in bytes.
+pub(crate) const FSP_PKEY_SIZE: usize = 384;
+/// Size of the RSA-3072 signature, in bytes.
+pub(crate) const FSP_SIG_SIZE: usize = 384;
+
+/// Structure to hold FMC signatures.
+///
+/// C representation is used because this type is used for communication with the FSP.
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub(crate) struct FmcSignatures {
+    pub(crate) hash384: [u8; FSP_HASH_SIZE],
+    pub(crate) public_key: [u8; FSP_PKEY_SIZE],
+    pub(crate) signature: [u8; FSP_SIG_SIZE],
+}
+
 pub(crate) struct FspFirmware {
     /// FMC firmware image data (only the "image" ELF section).
     #[expect(unused)]
     pub(crate) fmc_image: Coherent<[u8]>,
-    /// Full FMC ELF for signature extraction.
+    /// FMC firmware signatures.
     #[expect(unused)]
-    pub(crate) fmc_elf: Firmware,
+    pub(crate) fmc_sigs: KBox<FmcSignatures>,
 }
 
 impl FspFirmware {
@@ -41,7 +59,73 @@ impl FspFirmware {
 
         Ok(Self {
             fmc_image,
-            fmc_elf: fw,
+            fmc_sigs: Self::extract_fmc_signatures(&fw, dev)?,
         })
+    }
+
+    /// Extract FMC firmware signatures for Chain of Trust verification.
+    ///
+    /// Extracts real cryptographic signatures from FMC ELF32 firmware sections.
+    /// Returns signatures in a heap-allocated structure to prevent stack overflow.
+    fn extract_fmc_signatures(
+        fmc_fw: &Firmware,
+        dev: &device::Device,
+    ) -> Result<KBox<FmcSignatures>> {
+        let hash_section = crate::firmware::elf_section(fmc_fw.data(), "hash")
+            .ok_or(EINVAL)
+            .inspect_err(|_| dev_err!(dev, "FMC firmware missing 'hash' section\n"))?;
+
+        let pkey_section = crate::firmware::elf_section(fmc_fw.data(), "publickey")
+            .ok_or(EINVAL)
+            .inspect_err(|_| dev_err!(dev, "FMC firmware missing 'publickey' section\n"))?;
+
+        let sig_section = crate::firmware::elf_section(fmc_fw.data(), "signature")
+            .ok_or(EINVAL)
+            .inspect_err(|_| dev_err!(dev, "FMC firmware missing 'signature' section\n"))?;
+
+        if hash_section.len() != FSP_HASH_SIZE {
+            dev_err!(
+                dev,
+                "FMC hash section size {} != expected {}\n",
+                hash_section.len(),
+                FSP_HASH_SIZE
+            );
+            return Err(EINVAL);
+        }
+
+        if pkey_section.len() > FSP_PKEY_SIZE {
+            dev_err!(
+                dev,
+                "FMC publickey section size {} > maximum {}\n",
+                pkey_section.len(),
+                FSP_PKEY_SIZE
+            );
+            return Err(EINVAL);
+        }
+
+        if sig_section.len() > FSP_SIG_SIZE {
+            dev_err!(
+                dev,
+                "FMC signature section size {} > maximum {}\n",
+                sig_section.len(),
+                FSP_SIG_SIZE
+            );
+            return Err(EINVAL);
+        }
+
+        let mut signatures = KBox::new(
+            FmcSignatures {
+                hash384: [0; _],
+                public_key: [0; _],
+                signature: [0; _],
+            },
+            GFP_KERNEL,
+        )?;
+
+        signatures.hash384.copy_from_slice(hash_section);
+        signatures.public_key[..pkey_section.len()].copy_from_slice(pkey_section);
+        signatures.signature[..sig_section.len()].copy_from_slice(sig_section);
+
+        Ok(signatures)
     }
 }
