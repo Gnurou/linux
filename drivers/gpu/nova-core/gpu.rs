@@ -3,6 +3,10 @@
 use kernel::{
     device,
     devres::Devres,
+    dma::{
+        Device,
+        DmaMask, //
+    },
     fmt,
     io::Io,
     num::Bounded,
@@ -160,6 +164,16 @@ bounded_enum! {
     }
 }
 
+impl Architecture {
+    /// Returns the DMA mask supported by this architecture.
+    pub(crate) const fn dma_mask(&self) -> DmaMask {
+        match self {
+            Self::Turing | Self::Ampere | Self::Ada => DmaMask::new::<47>(),
+            Self::Hopper | Self::BlackwellGB10x | Self::BlackwellGB20x => DmaMask::new::<52>(),
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct Revision {
     major: Bounded<u8, 4>,
@@ -263,17 +277,21 @@ pub(crate) struct Gpu {
 
 impl Gpu {
     pub(crate) fn new<'a>(
-        pdev: &'a pci::Device<device::Bound>,
+        pdev: &'a pci::Device<device::Core>,
         devres_bar: Arc<Devres<Bar0>>,
         bar: &'a Bar0,
     ) -> impl PinInit<Self, Error> + 'a {
         try_pin_init!(Self {
             spec: Spec::new(pdev.as_ref(), bar).inspect(|spec| {
-                dev_info!(pdev,"NVIDIA ({})\n", spec);
+                dev_info!(pdev, "NVIDIA ({})\n", spec);
             })?,
 
             // We must wait for GFW_BOOT completion before doing any significant setup on the GPU.
             _: {
+                // SAFETY: `Gpu` owns all DMA allocations for this device, and we are
+                // still constructing it, so no concurrent DMA allocations can exist.
+                unsafe { pdev.dma_set_mask_and_coherent(spec.chipset.arch().dma_mask())? };
+
                 gfw::wait_gfw_boot_completion(bar)
                     .inspect_err(|_| dev_err!(pdev, "GFW boot did not complete\n"))?;
             },
