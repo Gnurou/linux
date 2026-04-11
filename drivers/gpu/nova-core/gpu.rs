@@ -21,6 +21,7 @@ use crate::{
         Falcon, //
     },
     fb::SysmemFlush,
+    fsp::FspCotVersion,
     gsp::{
         self,
         Gsp, //
@@ -140,6 +141,21 @@ impl Chipset {
     /// Returns the address range of the PCI config mirror space.
     pub(crate) fn pci_config_mirror_range(self) -> Range<u32> {
         hal::gpu_hal(self).pci_config_mirror_range()
+    }
+
+    /// Returns the FSP Chain of Trust (COT) protocol version for this chipset.
+    ///
+    /// Hopper (GH100) uses version 1, Blackwell uses version 2.
+    /// Returns `None` for architectures that do not use FSP.
+    #[expect(dead_code)]
+    pub(crate) const fn fsp_cot_version(&self) -> Option<FspCotVersion> {
+        match self.arch() {
+            Architecture::Hopper => Some(FspCotVersion::new(1)),
+            Architecture::BlackwellGB10x | Architecture::BlackwellGB20x => {
+                Some(FspCotVersion::new(2))
+            }
+            _ => None,
+        }
     }
 }
 
