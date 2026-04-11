@@ -33,6 +33,11 @@ impl FbHal for Gh100 {
         super::tu102::pmu_reserved_size_tu102()
     }
 
+    fn non_wpr_heap_size(&self) -> Option<u32> {
+        // 2 MiB non-WPR heap for Hopper (see Open RM: kgspCalculateFbLayout_GH100).
+        Some(0x200000)
+    }
+
     fn frts_size(&self) -> u64 {
         super::tu102::frts_size_tu102()
     }

@@ -17,7 +17,7 @@ mod gb100;
 mod gh100;
 mod tu102;
 
-pub(crate) trait FbHal {
+pub(super) trait FbHal {
     /// Returns the address of the currently-registered sysmem flush page.
     fn read_sysmem_flush_page(&self, bar: &Bar0) -> u64;
 
@@ -37,6 +37,13 @@ pub(crate) trait FbHal {
 
     /// Returns the FRTS size, in bytes.
     fn frts_size(&self) -> u64;
+
+    /// Returns the non-WPR heap size for GPUs that need large reserved memory.
+    ///
+    /// Returns `None` for GPUs that don't need extra reserved memory.
+    fn non_wpr_heap_size(&self) -> Option<u32> {
+        None
+    }
 }
 
 /// Returns the HAL corresponding to `chipset`.
