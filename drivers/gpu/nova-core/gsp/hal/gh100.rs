@@ -11,6 +11,7 @@ use kernel::{
 use crate::{
     driver::Bar0,
     falcon::{
+        fsp::Fsp as FspEngine,
         gsp::Gsp as GspEngine,
         sec2::Sec2,
         Falcon, //
@@ -35,14 +36,16 @@ impl GspHal for Gh100 {
     fn boot<'a>(
         &self,
         _gsp: &'a Gsp,
-        _dev: &'a device::Device<device::Bound>,
+        dev: &'a device::Device<device::Bound>,
         _bar: &'a Bar0,
-        _chipset: Chipset,
+        chipset: Chipset,
         _fb_layout: &FbLayout,
         _wpr_meta: &Coherent<GspFwWprMeta>,
         _gsp_falcon: &'a Falcon<GspEngine>,
         _sec2_falcon: &'a Falcon<Sec2>,
     ) -> Result<BootUnloadGuard<'a>> {
+        let _fsp_falcon = Falcon::<FspEngine>::new(dev, chipset)?;
+
         Err(ENOTSUPP)
     }
 }
