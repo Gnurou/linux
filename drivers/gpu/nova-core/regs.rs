@@ -467,6 +467,22 @@ register! {
     pub(crate) NV_PFALCON_FBIF_CTL(u32) @ PFalconBase + 0x00000624 {
         7:7     allow_phys_no_ctx => bool;
     }
+
+    // Falcon EMEM PIO registers (used by FSP on Hopper/Blackwell).
+    // These provide the falcon external memory communication interface.
+    pub(crate) NV_PFALCON_FALCON_EMEM_CTL(u32) @ PFalconBase + 0x00000ac0 {
+        /// EMEM byte offset (must be 4-byte aligned)
+        23:0    offset;
+        /// Write mode
+        24:24   wr_mode => bool;
+        /// Read mode
+        25:25   rd_mode => bool;
+    }
+
+    pub(crate) NV_PFALCON_FALCON_EMEM_DATA(u32) @ PFalconBase + 0x00000ac4 {
+        /// EMEM data register
+        31:0    data => u32;
+    }
 }
 
 impl NV_PFALCON_FALCON_DMACTL {
