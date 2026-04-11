@@ -24,10 +24,11 @@ use crate::{
         Falcon, //
     },
     fb::SysmemFlush,
-    gfw,
     gsp::Gsp,
     regs,
 };
+
+mod hal;
 
 macro_rules! define_chipset {
     ({ $($variant:ident = $value:expr),* $(,)* }) =>
@@ -292,7 +293,7 @@ impl Gpu {
                 // still constructing it, so no concurrent DMA allocations can exist.
                 unsafe { pdev.dma_set_mask_and_coherent(spec.chipset.arch().dma_mask())? };
 
-                gfw::wait_gfw_boot_completion(bar)
+                hal::gpu_hal(spec.chipset).wait_gfw_boot_completion(bar)
                     .inspect_err(|_| dev_err!(pdev, "GFW boot did not complete\n"))?;
             },
 
