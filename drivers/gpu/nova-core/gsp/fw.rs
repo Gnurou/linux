@@ -104,15 +104,6 @@ enum GspFwHeapParams {}
 /// Minimum required alignment for the GSP heap.
 const GSP_HEAP_ALIGNMENT: Alignment = Alignment::new::<{ 1 << 20 }>();
 
-// These constants override the generated bindings for architecture-specific heap sizing.
-//
-// 14MB for Hopper/Blackwell+.
-const GSP_FW_HEAP_PARAM_CLIENT_ALLOC_SIZE_GH100: u64 = 142 * u64::SZ_1M;
-// Hopper/Blackwell+ minimum heap size: 170MB (88 + 12 + 70).
-// See Open RM: GSP_FW_HEAP_SIZE_OVERRIDE_LIBOS3_BAREMETAL_MIN_MB for the base 88MB,
-// plus Hopper+ additions in kgspCalculateGspFwHeapSize_GH100.
-const GSP_FW_HEAP_SIZE_OVERRIDE_LIBOS3_BAREMETAL_MIN_MB_HOPPER: u64 = 170;
-
 impl GspFwHeapParams {
     /// Returns the amount of GSP-RM heap memory used during GSP-RM boot and initialization (up to
     /// and including the first client subdevice allocation).
@@ -129,17 +120,10 @@ impl GspFwHeapParams {
     }
 
     /// Returns the amount of heap memory required to support a single channel allocation.
-    fn client_alloc_size(chipset: Chipset) -> Result<u64> {
-        use crate::gpu::Architecture;
-        let size = match chipset.arch() {
-            Architecture::Turing | Architecture::Ampere | Architecture::Ada => {
-                u64::from(bindings::GSP_FW_HEAP_PARAM_CLIENT_ALLOC_SIZE)
-            }
-            Architecture::Hopper | Architecture::BlackwellGB10x | Architecture::BlackwellGB20x => {
-                GSP_FW_HEAP_PARAM_CLIENT_ALLOC_SIZE_GH100
-            }
-        };
-        size.align_up(GSP_HEAP_ALIGNMENT).ok_or(EINVAL)
+    fn client_alloc_size() -> u64 {
+        u64::from(bindings::GSP_FW_HEAP_PARAM_CLIENT_ALLOC_SIZE)
+            .align_up(GSP_HEAP_ALIGNMENT)
+            .unwrap_or(u64::MAX)
     }
 
     /// Returns the amount of memory to reserve for management purposes for a framebuffer of size
@@ -182,26 +166,12 @@ impl LibosParams {
                 * u64::SZ_1M,
     };
 
-    /// Hopper/Blackwell+ GPUs need a larger minimum heap size than the bindings specify.
-    /// The r570 bindings set LIBOS3_BAREMETAL_MIN_MB to 88MB, but Hopper/Blackwell+ actually
-    /// requires 170MB (88 + 12 + 70).
-    const LIBOS_HOPPER: LibosParams = LibosParams {
-        carveout_size: num::u32_as_u64(bindings::GSP_FW_HEAP_PARAM_OS_SIZE_LIBOS3_BAREMETAL),
-        allowed_heap_size: GSP_FW_HEAP_SIZE_OVERRIDE_LIBOS3_BAREMETAL_MIN_MB_HOPPER * u64::SZ_1M
-            ..num::u32_as_u64(bindings::GSP_FW_HEAP_SIZE_OVERRIDE_LIBOS3_BAREMETAL_MAX_MB)
-                * u64::SZ_1M,
-    };
-
     /// Returns the libos parameters corresponding to `chipset`.
     pub(crate) fn from_chipset(chipset: Chipset) -> &'static LibosParams {
-        use crate::gpu::Architecture;
-        match chipset.arch() {
-            Architecture::Turing => &Self::LIBOS2,
-            Architecture::Ampere if chipset == Chipset::GA100 => &Self::LIBOS2,
-            Architecture::Ampere | Architecture::Ada => &Self::LIBOS3,
-            Architecture::Hopper | Architecture::BlackwellGB10x | Architecture::BlackwellGB20x => {
-                &Self::LIBOS_HOPPER
-            }
+        if chipset < Chipset::GA102 {
+            &Self::LIBOS2
+        } else {
+            &Self::LIBOS3
         }
     }
 
@@ -215,7 +185,7 @@ impl LibosParams {
             // RM boot working memory,
             .saturating_add(GspFwHeapParams::base_rm_size(chipset))
             // One RM client,
-            .saturating_add(GspFwHeapParams::client_alloc_size(chipset)?)
+            .saturating_add(GspFwHeapParams::client_alloc_size())
             // Overhead for memory management.
             .saturating_add(GspFwHeapParams::management_overhead(fb_size)?)
             // Clamp to the supported heap sizes.
