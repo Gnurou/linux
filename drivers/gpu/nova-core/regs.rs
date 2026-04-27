@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
+// SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 use kernel::{
     io::{
@@ -144,6 +145,42 @@ register! {
     pub(crate) NV_PFB_PRI_MMU_WPR2_ADDR_HI(u32) @ 0x001fa828 {
         /// Bits 12..40 of the higher (exclusive) bound of the WPR2 region.
         31:4    hi_val;
+    }
+
+    // Blackwell GB10x sysmem flush registers (HSHUB0).
+    //
+    // GB10x GPUs use two pairs of HSHUB registers for sysmembar: a primary pair and an EG
+    // (egress) pair. Both must be programmed to the same address. Hardware ignores bits 7:0
+    // of each LO register. HSHUB0 base is 0x00891000.
+
+    pub(crate) NV_PFB_HSHUB0_PCIE_FLUSH_SYSMEM_ADDR_LO(u32) @ 0x00891e50 {
+        31:0    adr => u32;
+    }
+
+    pub(crate) NV_PFB_HSHUB0_PCIE_FLUSH_SYSMEM_ADDR_HI(u32) @ 0x00891e54 {
+        19:0    adr;
+    }
+
+    pub(crate) NV_PFB_HSHUB0_EG_PCIE_FLUSH_SYSMEM_ADDR_LO(u32) @ 0x008916c0 {
+        31:0    adr => u32;
+    }
+
+    pub(crate) NV_PFB_HSHUB0_EG_PCIE_FLUSH_SYSMEM_ADDR_HI(u32) @ 0x008916c4 {
+        19:0    adr;
+    }
+
+    // Blackwell GB20x sysmem flush registers (FBHUB0).
+    //
+    // Unlike the older NV_PFB_NISO_FLUSH_SYSMEM_ADDR registers which encode the address with an
+    // 8-bit right-shift, these registers take the raw address split into lower/upper 32-bit halves.
+    // The hardware ignores bits 7:0 of the LO register.
+
+    pub(crate) NV_PFB_FBHUB0_PCIE_FLUSH_SYSMEM_ADDR_LO(u32) @ 0x008a1d58 {
+        31:0    adr => u32;
+    }
+
+    pub(crate) NV_PFB_FBHUB0_PCIE_FLUSH_SYSMEM_ADDR_HI(u32) @ 0x008a1d5c {
+        19:0    adr;
     }
 }
 
