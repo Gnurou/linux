@@ -20,6 +20,7 @@ use crate::{
     fb::SysmemFlush,
     gsp::{
         self,
+        commands::GetGspStaticInfoReply,
         Gsp, //
     },
     regs,
@@ -273,6 +274,8 @@ pub(crate) struct Gpu<'gpu> {
     /// GSP and its resources.
     #[pin]
     gsp_resources: GspResources<'gpu>,
+    /// Static GPU information from the GSP.
+    gsp_static_info: GetGspStaticInfoReply,
 }
 
 impl<'gpu> Gpu<'gpu> {
@@ -311,7 +314,7 @@ impl<'gpu> Gpu<'gpu> {
                 unload_bundle: gsp.boot(pdev, bar, spec.chipset, gsp_falcon, sec2_falcon)?,
             }),
 
-            _: {
+            gsp_static_info: {
                 let gsp = &gsp_resources.as_ref().get_ref().gsp;
 
                 // Obtain and display basic GPU information.
@@ -322,6 +325,8 @@ impl<'gpu> Gpu<'gpu> {
                     Ok(name) => dev_info!(pdev, "GPU name: {}\n", name),
                     Err(e) => dev_warn!(pdev, "GPU name unavailable: {:?}\n", e),
                 }
+
+                info
             }
         })
     }
