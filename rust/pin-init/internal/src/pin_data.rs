@@ -395,6 +395,7 @@ fn generate_the_pin_data(
             ///   to deallocate.
             #pin_safety
             #(#attrs)*
+            #[inline(always)]
             #vis unsafe fn #ident<E>(
                 self,
                 slot: *mut #ty,
@@ -409,6 +410,7 @@ fn generate_the_pin_data(
             ///
             #[doc = #slot_safety]
             #(#attrs)*
+            #[inline(always)]
             #vis unsafe fn #project_ident<'__slot>(
                 self,
                 slot: &'__slot mut #ty,
