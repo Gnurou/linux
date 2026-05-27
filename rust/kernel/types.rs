@@ -367,6 +367,7 @@ impl<T> Opaque<T> {
     /// This function is safe, because the `T` inside of an `Opaque` is allowed to be
     /// uninitialized. Additionally, access to the inner `T` requires `unsafe`, so the caller needs
     /// to verify at that point that the inner value is valid.
+    #[inline(always)]
     pub fn ffi_init(init_func: impl FnOnce(*mut T)) -> impl PinInit<Self> {
         // SAFETY: We contain a `MaybeUninit`, so it is OK for the `init_func` to not fully
         // initialize the `T`.
@@ -386,6 +387,7 @@ impl<T> Opaque<T> {
     /// This function is safe, because the `T` inside of an `Opaque` is allowed to be
     /// uninitialized. Additionally, access to the inner `T` requires `unsafe`, so the caller needs
     /// to verify at that point that the inner value is valid.
+    #[inline(always)]
     pub fn try_ffi_init<E>(
         init_func: impl FnOnce(*mut T) -> Result<(), E>,
     ) -> impl PinInit<Self, E> {
@@ -417,6 +419,7 @@ impl<T> Opaque<T> {
 
 impl<T> Wrapper<T> for Opaque<T> {
     /// Create an opaque pin-initializer from the given pin-initializer.
+    #[inline(always)]
     fn pin_init<E>(slot: impl PinInit<T, E>) -> impl PinInit<Self, E> {
         Self::try_ffi_init(|ptr: *mut T| {
             // SAFETY:
