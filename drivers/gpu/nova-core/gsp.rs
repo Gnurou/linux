@@ -30,10 +30,13 @@ pub(crate) use fw::{
 };
 
 use crate::{
-    gsp::cmdq::Cmdq,
-    gsp::fw::{
-        GspArgumentsPadded,
-        LibosMemoryRegionInitArgument, //
+    driver::Bar0,
+    gsp::{
+        cmdq::Cmdq,
+        fw::{
+            GspArgumentsPadded,
+            LibosMemoryRegionInitArgument, //
+        },
     },
     num,
 };
@@ -183,6 +186,10 @@ impl Gsp {
                 },
             }))
         })
+    }
+
+    pub(crate) fn get_static_info(&self, bar: &Bar0) -> Result<commands::GetGspStaticInfoReply> {
+        self.cmdq.send_command(bar, commands::GetGspStaticInfo)
     }
 }
 

@@ -310,6 +310,19 @@ impl<'gpu> Gpu<'gpu> {
 
                 unload_bundle: gsp.boot(pdev, bar, spec.chipset, gsp_falcon, sec2_falcon)?,
             }),
+
+            _: {
+                let gsp = &gsp_resources.as_ref().get_ref().gsp;
+
+                // Obtain and display basic GPU information.
+                let info = gsp
+                    .get_static_info(bar)
+                    .inspect_err(|e| dev_err!(pdev, "Failed to obtain GSP static info ({:?})\n", e))?;
+                match info.gpu_name() {
+                    Ok(name) => dev_info!(pdev, "GPU name: {}\n", name),
+                    Err(e) => dev_warn!(pdev, "GPU name unavailable: {:?}\n", e),
+                }
+            }
         })
     }
 }
