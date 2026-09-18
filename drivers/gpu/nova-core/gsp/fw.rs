@@ -3,7 +3,6 @@
 
 pub(crate) mod commands;
 mod r000_00;
-mod r570_144;
 
 // Alias to avoid repeating the version number with every use.
 use r000_00 as bindings;
