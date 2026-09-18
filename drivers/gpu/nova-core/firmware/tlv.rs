@@ -4,6 +4,7 @@
 use kernel::{
     device,
     firmware,
+    fmt,
     prelude::*,
     str::CString, //
 };
@@ -13,15 +14,18 @@ use crate::{
     num::*, //
 };
 
+/// Returns the path of `file` in `chipset`'s GSP firmware directory.
+fn gsp_firmware_path(chipset: gpu::Chipset, file: fmt::Arguments<'_>) -> Result<CString> {
+    CString::try_from_fmt(fmt!("nvidia/{}/gsp/{}", chipset.name(), file))
+}
+
 /// Requests the GPU firmware TLV `name` suitable for `chipset`.
 pub(crate) fn request_tlv(
     dev: &device::Device,
     chipset: gpu::Chipset,
     name: &str,
 ) -> Result<firmware::Firmware> {
-    let chip_name = chipset.name();
-
-    let filename = CString::try_from_fmt(fmt!("nvidia/{chip_name}/gsp/{name}.tlv"))?;
+    let filename = gsp_firmware_path(chipset, fmt!("{name}.tlv"))?;
 
     dev_dbg!(dev, "loading firmware image {:?}\n", &filename);
 
@@ -196,6 +200,36 @@ impl<'a> Tlv<'a> {
 
     fn find(&self, tag: &[u8; 4]) -> Result<TlvBlock<'a>> {
         self.iter().find(|b| b.tag == *tag).ok_or(EINVAL)
+    }
+
+    /// Loads the file that the `FILE` tag names from `chipset`'s GSP firmware directory.
+    ///
+    /// The `SIZE` tag gives the file's length, and the returned buffer is that long.
+    ///
+    /// # Errors
+    ///
+    /// - `EINVAL` if `FILE` or `SIZE` is absent, or `FILE` does not hold a valid string.
+    /// - `ENODATA` if `SIZE` is zero.
+    /// - `ENOMEM` if the buffer cannot be allocated.
+    ///
+    /// Errors from the firmware request, `ENOENT` in particular, are propagated as-is.
+    pub(crate) fn load_file(
+        &self,
+        dev: &device::Device,
+        chipset: gpu::Chipset,
+    ) -> Result<VVec<u8>> {
+        let file = self.get_string(b"FILE")?;
+        let path = gsp_firmware_path(chipset, fmt!("{file}"))?;
+
+        let size = usize::from_safe_cast(self.get_u32(b"SIZE")?);
+        if size == 0 {
+            return Err(ENODATA);
+        }
+
+        let mut data = VVec::zeroed(size, GFP_KERNEL).map_err(|_| ENOMEM)?;
+        firmware::request_into_buf(&path, dev, data.as_mut_slice())?;
+
+        Ok(data)
     }
 
     /// Return a slice of bytes.

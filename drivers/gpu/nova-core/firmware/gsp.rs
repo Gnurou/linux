@@ -6,9 +6,7 @@ use kernel::{
         Coherent,
         DmaAddress, //
     },
-    firmware,
-    prelude::*,
-    str::CString,
+    prelude::*, //
 };
 
 use crate::{
@@ -20,8 +18,7 @@ use crate::{
             Tlv,
         },
     },
-    gpu::Chipset,
-    num::FromSafeCast,
+    gpu::Chipset, //
 };
 
 /// The GSP firmware image, its signatures, and the GSP bootloader.
@@ -48,13 +45,7 @@ impl<'a> GspFirmware<'a> {
             let tlv = Tlv::new(firmware.data())?;
             dev_dbg!(dev, "loaded gsp firmware v{}\n", tlv.get_string(b"VERS")?);
 
-            let size = usize::from_safe_cast(tlv.get_u32(b"SIZE")?);
-            let mut fw_vvec = VVec::zeroed(size, GFP_KERNEL).map_err(|_| ENOMEM)?;
-
-            let chip_name = chipset.name();
-            let file = tlv.get_string(b"FILE")?;
-            let filename = CString::try_from_fmt(fmt!("nvidia/{chip_name}/gsp/{file}"))?;
-            firmware::request_into_buf(&filename, dev, fw_vvec.as_mut_slice())?;
+            let fw_vvec = tlv.load_file(dev, chipset)?;
 
             let signatures = Coherent::from_slice(dev, tlv.get_bytes(b"SIGN")?, GFP_KERNEL)?;
 
