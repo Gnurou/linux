@@ -408,6 +408,18 @@ impl Device {
         unsafe { bindings::pci_dev_id(self.as_raw()) }
     }
 
+    /// Returns the PCI domain number of the bus that this device is on.
+    #[inline]
+    pub fn domain_nr(&self) -> u32 {
+        // SAFETY: By its type invariant `self.as_raw` is always a valid pointer to a
+        // `struct pci_dev`.
+        let domain_nr = unsafe { bindings::pci_domain_nr(self.as_raw()) };
+        debug_assert!(domain_nr >= 0);
+
+        // CAST: `pci_domain_nr` returns a non-negative domain number in an `int`.
+        domain_nr as u32
+    }
+
     /// Returns the PCI subsystem vendor ID.
     #[inline]
     pub fn subsystem_vendor_id(&self) -> u16 {
