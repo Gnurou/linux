@@ -5,10 +5,20 @@ mod ga102;
 mod gh100;
 mod tu102;
 
-use kernel::prelude::*;
+use kernel::{
+    device,
+    prelude::*, //
+};
 
 use crate::{
-    firmware::gsp::GspFirmware,
+    falcon::{
+        gsp::Gsp as GspEngine,
+        Falcon, //
+    },
+    firmware::{
+        gen_bootloader::GenericBootloader,
+        gsp::GspFirmware, //
+    },
     gpu::{
         Architecture,
         Chipset, //
@@ -41,6 +51,24 @@ pub(super) trait GspHal: Send {
         ctx: &mut GspBootContext<'_, 'gpu>,
         gsp_fw: &GspFirmware<'gpu>,
     ) -> Result<Option<super::UnloadBundle<'gpu>>>;
+
+    /// Loads the generic falcon bootloader for the chipsets whose GSP boots through it.
+    ///
+    /// The bootloader runs from the last blocks of an IMEM of `imem_size` bytes. On every other
+    /// chipset this returns `None`.
+    ///
+    /// # Errors
+    ///
+    /// Errors from loading the bootloader image are propagated as-is.
+    #[expect(dead_code)]
+    fn generic_bootloader(
+        &self,
+        _dev: &device::Device<device::Bound>,
+        _chipset: Chipset,
+        _gsp_falcon: &Falcon<'_, GspEngine>,
+    ) -> Result<Option<GenericBootloader>> {
+        Ok(None)
+    }
 
     /// Performs HAL-specific post-GSP boot tasks.
     ///
