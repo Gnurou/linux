@@ -28,6 +28,10 @@ bounded_enum! {
         Cot = 0x14,
         /// FSP command response.
         FspResponse = 0x15,
+        /// RPC message to or from GSP-RM.
+        RmRpc = 0x25,
+        /// GMC (GPU Management Controller) API message to or from GSP-RM.
+        GmcApi = 0x26,
     }
 }
 
@@ -67,6 +71,12 @@ impl MctpHeader {
     pub(crate) fn is_single_packet(self) -> bool {
         self.som().into_bool() && self.eom().into_bool()
     }
+
+    /// Returns whether this header carries the MCTP version this driver uses.
+    #[expect(dead_code)]
+    pub(crate) fn has_expected_version(self) -> bool {
+        u32::from(self.version()) == Self::VERSION
+    }
 }
 
 /// MCTP message type for PCI vendor-defined messages.
@@ -93,10 +103,17 @@ impl NvdmHeader {
             .with_nvdm_type(nvdm_type)
     }
 
-    /// Validates this header against the expected NVIDIA NVDM format and type.
-    pub(crate) fn validate(self, expected_type: NvdmType) -> bool {
+    /// Returns whether this is the header of a PCI vendor-defined message from NVIDIA.
+    ///
+    /// The GPU firmware only ever sends such messages, so a mismatch is a sign of corruption.
+    pub(crate) fn has_nvidia_vendor(self) -> bool {
         u8::from(self.msg_type()) == MSG_TYPE_VENDOR_PCI
             && u16::from(self.vendor_id()) == Vendor::NVIDIA.as_raw()
+    }
+
+    /// Validates this header against the expected NVIDIA NVDM format and type.
+    pub(crate) fn validate(self, expected_type: NvdmType) -> bool {
+        self.has_nvidia_vendor()
             && matches!(self.nvdm_type(), Ok(nvdm_type) if nvdm_type == expected_type)
     }
 }

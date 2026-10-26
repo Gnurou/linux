@@ -51,6 +51,11 @@ use crate::{
         cmdq::Cmdq, //
         GSP_PAGE_SIZE,
     },
+    mctp::{
+        MctpHeader,
+        NvdmHeader,
+        NvdmType, //
+    },
     num::{
         self,
         FromSafeCast, //
@@ -907,6 +912,168 @@ impl RpcMessageHeader {
     }
 }
 
+/// First word of every r000 queue element: `"MCTP"` in ASCII.
+#[expect(dead_code)]
+const MCTP_MAGIC: u32 = 0x4D43_5450;
+
+/// Header opening every element of the r000 GSP queues, whatever kind of message follows.
+///
+/// A queue element is laid out as follows:
+///
+/// ```text
+///     +------------------------------------+
+///     | queue element header               |  this type: MCTP magic, element length, MCTP
+///     |                                    |  header, NVDM header, message length
+///     +------------------------------------+
+///     | message header                     |  the RPC header or the GMC API header. The NVDM
+///     +------------------------------------+  type selects between the two.
+///     | payload                            |  message-specific data
+///     +------------------------------------+
+/// ```
+///
+/// This is the `noEncryption` layout of the `GSP_MSG_QUEUE_ELEMENT` binding. That binding keeps
+/// a 16-byte encryption tag, used only with confidential computing, in a union with the two
+/// trailing fields of this header, so wrapping it would make every element 16 bytes larger than
+/// what the GSP expects. The fields are thus declared again here, with their offsets checked
+/// against the binding. OpenRM has the same split and calls the size of this layout
+/// `GSP_MSG_QUEUE_ELEMENT_SIZE_NO_ENCRYPTION`.
+#[repr(C)]
+pub(crate) struct QueueElementHeader {
+    /// Always `MCTP_MAGIC`.
+    mctp_magic: u32,
+    /// Length in bytes of the whole element, this header included.
+    ///
+    /// Under confidential computing the GSP pads elements out to whole queue slots, so this can
+    /// be larger than `nvdm_payload_size` plus the size of this header, but never smaller.
+    mctp_payload_size: u32,
+    mctp_header: MctpHeader,
+    nvdm_header: NvdmHeader,
+    /// Length in bytes of the message following this header: the message header and its
+    /// payload.
+    nvdm_payload_size: u32,
+    reserved: u32,
+}
+
+/// The `noEncryption` member of the union of `GSP_MSG_QUEUE_ELEMENT`, which holds the two
+/// trailing fields of [`QueueElementHeader`].
+type QueueElementNoEncryption = r000_00::GSP_MSG_QUEUE_ELEMENT__bindgen_ty_1__bindgen_ty_2;
+
+/// Offset of [`QueueElementNoEncryption`] within `GSP_MSG_QUEUE_ELEMENT`.
+const QUEUE_ELEMENT_NO_ENCRYPTION_OFFSET: usize =
+    core::mem::offset_of!(r000_00::GSP_MSG_QUEUE_ELEMENT, __bindgen_anon_1)
+        + core::mem::offset_of!(r000_00::GSP_MSG_QUEUE_ELEMENT__bindgen_ty_1, noEncryption);
+
+static_assert!(
+    core::mem::offset_of!(QueueElementHeader, mctp_magic)
+        == core::mem::offset_of!(r000_00::GSP_MSG_QUEUE_ELEMENT, mctpMagic)
+);
+static_assert!(
+    core::mem::offset_of!(QueueElementHeader, mctp_payload_size)
+        == core::mem::offset_of!(r000_00::GSP_MSG_QUEUE_ELEMENT, mctpPayloadSize)
+);
+static_assert!(
+    core::mem::offset_of!(QueueElementHeader, mctp_header)
+        == core::mem::offset_of!(r000_00::GSP_MSG_QUEUE_ELEMENT, mctpHeader)
+);
+static_assert!(
+    core::mem::offset_of!(QueueElementHeader, nvdm_header)
+        == core::mem::offset_of!(r000_00::GSP_MSG_QUEUE_ELEMENT, nvdmHeader)
+);
+static_assert!(
+    core::mem::offset_of!(QueueElementHeader, nvdm_payload_size)
+        == QUEUE_ELEMENT_NO_ENCRYPTION_OFFSET
+            + core::mem::offset_of!(QueueElementNoEncryption, nvdmPayloadSize)
+);
+static_assert!(
+    core::mem::offset_of!(QueueElementHeader, reserved)
+        == QUEUE_ELEMENT_NO_ENCRYPTION_OFFSET
+            + core::mem::offset_of!(QueueElementNoEncryption, reserved)
+);
+static_assert!(
+    size_of::<QueueElementHeader>()
+        == QUEUE_ELEMENT_NO_ENCRYPTION_OFFSET + size_of::<QueueElementNoEncryption>()
+);
+
+#[expect(dead_code)]
+impl QueueElementHeader {
+    /// Creates the header of an element carrying a message of NVDM type `nvdm_type` and
+    /// `message_len` bytes, message header included.
+    ///
+    /// # Errors
+    ///
+    /// - `EOVERFLOW` if a length does not fit its 32-bit field.
+    pub(crate) fn init(nvdm_type: NvdmType, message_len: usize) -> impl Init<Self, Error> {
+        try_init!(QueueElementHeader {
+            mctp_magic: MCTP_MAGIC,
+            mctp_payload_size: size_of::<Self>()
+                .checked_add(message_len)
+                .ok_or(EOVERFLOW)?
+                .try_into()
+                .map_err(|_| EOVERFLOW)?,
+            mctp_header: MctpHeader::single_packet(),
+            nvdm_header: NvdmHeader::new(nvdm_type),
+            nvdm_payload_size: message_len.try_into().map_err(|_| EOVERFLOW)?,
+            reserved: 0,
+        })
+    }
+
+    /// Returns the length of the whole element, this header included.
+    pub(crate) fn element_len(&self) -> usize {
+        num::u32_as_usize(self.mctp_payload_size)
+    }
+
+    /// Returns the length of the message following this header, message header included.
+    pub(crate) fn message_len(&self) -> usize {
+        num::u32_as_usize(self.nvdm_payload_size)
+    }
+
+    /// Returns the number of elements (i.e. memory pages) used by this element.
+    pub(crate) fn element_count(&self) -> u32 {
+        self.mctp_payload_size.div_ceil(cv!(GSP_PAGE_SIZE))
+    }
+
+    /// Returns the NVDM type of the message following this header, or `EINVAL` if it is not a
+    /// known one.
+    pub(crate) fn nvdm_type(&self) -> Result<NvdmType> {
+        self.nvdm_header.nvdm_type()
+    }
+
+    /// Validates the framing of the element.
+    ///
+    /// # Errors
+    ///
+    /// - `EIO` if the magic, the MCTP version or the NVDM vendor is wrong, or if the element
+    ///   length is smaller than this header and the message together, or larger than the
+    ///   maximum element size.
+    pub(crate) fn validate(&self) -> Result {
+        // The MCTP start-of-message and end-of-message bits are not checked: every element
+        // carries one whole message, as large RPCs are split into continuation records, not
+        // MCTP packets.
+        if self.mctp_magic != MCTP_MAGIC
+            || !self.mctp_header.has_expected_version()
+            || !self.nvdm_header.has_nvidia_vendor()
+        {
+            return Err(EIO);
+        }
+
+        let element_len = self.element_len();
+        if element_len < size_of::<Self>().saturating_add(self.message_len())
+            || element_len > GSP_MSG_QUEUE_ELEMENT_SIZE_MAX
+        {
+            return Err(EIO);
+        }
+
+        Ok(())
+    }
+}
+
+// SAFETY: All fields are integer types or transparent wrappers over one, with no padding.
+unsafe impl AsBytes for QueueElementHeader {}
+
+// SAFETY: All fields are integer types or transparent wrappers over one, for which all bit
+// patterns are valid.
+unsafe impl FromBytes for QueueElementHeader {}
+
 bounded_enum! {
     /// Commands of the GMC API.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -932,7 +1099,7 @@ bitfield! {
 
 /// Header of a GMC (GPU Management Controller) API message.
 ///
-/// In a queue element, it follows the queue element header and precedes the payload of the
+/// In a queue element, it follows the [`QueueElementHeader`] and precedes the payload of the
 /// command.
 #[repr(transparent)]
 pub(crate) struct GmcApiHeader {

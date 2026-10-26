@@ -39,6 +39,60 @@ pub type u16_ = __u16;
 pub type u32_ = __u32;
 pub type u64_ = __u64;
 #[repr(C)]
+#[derive(Debug, Default, Copy, Clone, MaybeZeroable)]
+pub struct GSP_MSG_QUEUE_ENCRYPTION_TAG {
+    pub authTagBuffer: [u8_; 16usize],
+}
+#[repr(C)]
+#[derive(MaybeZeroable)]
+pub struct GSP_MSG_QUEUE_ELEMENT {
+    pub mctpMagic: u32_,
+    pub mctpPayloadSize: u32_,
+    pub mctpHeader: u32_,
+    pub nvdmHeader: u32_,
+    pub __bindgen_anon_1: GSP_MSG_QUEUE_ELEMENT__bindgen_ty_1,
+}
+#[repr(C)]
+#[derive(MaybeZeroable)]
+pub struct GSP_MSG_QUEUE_ELEMENT__bindgen_ty_1 {
+    pub withEncryption: __BindgenUnionField<GSP_MSG_QUEUE_ELEMENT__bindgen_ty_1__bindgen_ty_1>,
+    pub noEncryption: __BindgenUnionField<GSP_MSG_QUEUE_ELEMENT__bindgen_ty_1__bindgen_ty_2>,
+    pub bindgen_union_field: [u32; 6usize],
+}
+#[repr(C)]
+#[derive(Debug, Default, MaybeZeroable)]
+pub struct GSP_MSG_QUEUE_ELEMENT__bindgen_ty_1__bindgen_ty_1 {
+    pub encryptionTag: GSP_MSG_QUEUE_ENCRYPTION_TAG,
+    pub nvdmPayloadSize: u32_,
+    pub reserved: u32_,
+    pub payload: __IncompleteArrayField<u8_>,
+}
+#[repr(C)]
+#[derive(Debug, Default, MaybeZeroable)]
+pub struct GSP_MSG_QUEUE_ELEMENT__bindgen_ty_1__bindgen_ty_2 {
+    pub nvdmPayloadSize: u32_,
+    pub reserved: u32_,
+    pub payload: __IncompleteArrayField<u8_>,
+}
+impl Default for GSP_MSG_QUEUE_ELEMENT__bindgen_ty_1 {
+    fn default() -> Self {
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
+        unsafe {
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            s.assume_init()
+        }
+    }
+}
+impl Default for GSP_MSG_QUEUE_ELEMENT {
+    fn default() -> Self {
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
+        unsafe {
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            s.assume_init()
+        }
+    }
+}
+#[repr(C)]
 #[derive(MaybeZeroable)]
 pub struct GMCAPI_HEADER {
     pub command: u32_,
