@@ -420,6 +420,12 @@ struct GspMessage<'a> {
 enum GspParsedMessage<'a> {
     /// A [RPC message](rpc::RpcMessage).
     Rpc(rpc::RpcMessage<'a>),
+    /// A [GMC message](gmc::GmcMessage).
+    //
+    // The transport header of the r570 firmware carries no message type, so this variant cannot
+    // be constructed before the switch to r000.
+    #[expect(dead_code)]
+    Gmc(gmc::GmcMessage<'a>),
 }
 
 impl GspParsedMessage<'_> {
@@ -427,6 +433,7 @@ impl GspParsedMessage<'_> {
     fn log(&self, dev: &device::Device) {
         match self {
             GspParsedMessage::Rpc(rpc) => rpc.log(dev),
+            GspParsedMessage::Gmc(gmc) => gmc.log(dev),
         }
     }
 }
