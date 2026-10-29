@@ -40,6 +40,10 @@ pub(crate) mod sec2;
 /// Alignment (in bytes) of falcon memory blocks.
 pub(crate) const MEM_BLOCK_ALIGNMENT: usize = 256;
 
+/// `MAILBOX0` value that means "the falcon binary has not started". A binary that runs replaces
+/// it with its own status.
+pub(crate) const FLCN_ERR_BINARY_NOT_STARTED: u32 = 0xfe;
+
 bounded_enum! {
     /// Revision number of a falcon core, used in the [`crate::regs::NV_PFALCON_FALCON_HWCFG1`]
     /// register.
@@ -141,7 +145,6 @@ pub(crate) enum FalconDmaSource<'a> {
     /// A DMA object in system memory.
     Sysmem(&'a Coherent<'a, [u8]>),
     /// GPU framebuffer memory at physical address `base`.
-    #[expect(dead_code)]
     Framebuffer { base: u64 },
 }
 
@@ -168,6 +171,17 @@ bounded_enum! {
         Virtual = 0,
         /// Physical memory addresses.
         Physical = 1,
+    }
+}
+
+bounded_enum! {
+    /// Engine ID that the falcon's framebuffer interface (FBIF) tags a DMA transfer with.
+    #[derive(Debug, Copy, Clone)]
+    pub(crate) enum FalconFbifEngineIdFlag with From<Bounded<u32, 1>> {
+        /// The BAR2 engine ID of PCI function 0.
+        Bar2Fn0 = 0,
+        /// The falcon's own engine ID.
+        Own = 1,
     }
 }
 
@@ -519,9 +533,43 @@ impl<'a, E: FalconEngine + 'static> Falcon<'a, E> {
         Ok(())
     }
 
+    /// Programs FBIF context DMA slot `ctx_dma` with the value that `configure` returns, runs `f`,
+    /// and restores the slot once `f` has returned `Ok`.
+    ///
+    /// The slot keeps the programmed value if `f` fails, since a falcon that `f` started and that
+    /// has not halted may still be reading through the aperture.
+    ///
+    /// # Errors
+    ///
+    /// - `EINVAL` if `ctx_dma` is not a context DMA slot that the falcon has.
+    ///
+    /// Errors from `f` are propagated as-is.
+    pub(crate) fn with_fbif_transcfg<R>(
+        &self,
+        ctx_dma: u32,
+        configure: impl FnOnce(regs::NV_PFALCON_FBIF_TRANSCFG) -> regs::NV_PFALCON_FBIF_TRANSCFG,
+        f: impl FnOnce() -> Result<R>,
+    ) -> Result<R> {
+        // The location type is not `Copy`, so each register access builds its own.
+        let transcfg =
+            || regs::NV_PFALCON_FBIF_TRANSCFG::try_at(usize::from_safe_cast(ctx_dma)).ok_or(EINVAL);
+
+        let saved = self.pfalcon.read(transcfg()?);
+        self.pfalcon.update(transcfg()?, configure);
+
+        let result = f()?;
+
+        self.pfalcon.update(transcfg()?, |_| saved);
+
+        Ok(result)
+    }
+
     /// Perform a DMA write according to `load_offsets` from `src` into the falcon's
     /// `target_mem`.
-    fn dma_wr(
+    ///
+    /// The caller programs the FBIF aperture of context DMA slot 0 for the location of `src`
+    /// beforehand.
+    pub(crate) fn dma_wr(
         &self,
         src: FalconDmaSource<'_>,
         target_mem: FalconMem,
@@ -668,6 +716,11 @@ impl<'a, E: FalconEngine + 'static> Falcon<'a, E> {
             .write_reg(regs::NV_PFALCON_FALCON_BOOTVEC::zeroed().with_value(fw.boot_addr()));
 
         Ok(())
+    }
+
+    /// Programs the boot ROM (BROM) registers with `params`, on the falcons whose HAL has them.
+    pub(crate) fn program_brom(&self, params: &FalconBromParams) {
+        self.hal.program_brom(self, params);
     }
 
     /// Wait until the falcon CPU is halted.

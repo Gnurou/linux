@@ -97,15 +97,19 @@ impl<'a> Falcon<'a, Gsp> {
         self.hal.retrigger(self);
     }
 
-    /// Checks if GSP reload/resume has completed during the boot process.
-    pub(crate) fn check_reload_completed(&self, timeout: Delta) -> Result<bool> {
+    /// Waits until the Boot Sequence Interface (BSI) reports that the GSP reload has completed.
+    ///
+    /// # Errors
+    ///
+    /// - `ETIMEDOUT` if the reload has not completed within `timeout`.
+    pub(crate) fn check_reload_completed(&self, timeout: Delta) -> Result {
         read_poll_timeout(
             || Ok(self.bar.read(regs::NV_PGC6_BSI_SECURE_SCRATCH_14)),
             |val| val.boot_stage_3_handoff(),
             Delta::ZERO,
             timeout,
         )
-        .map(|_| true)
+        .map(|_| ())
     }
 
     /// Returns whether the RISC-V branch privilege lockdown bit is set.

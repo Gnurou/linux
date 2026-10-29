@@ -146,7 +146,6 @@ where
 
     /// Ideally we would implement `Read`, but it is not available in `core`.
     /// So mimic `std::io::Read::read_exact`.
-    #[expect(unused)]
     pub(crate) fn read_exact(&mut self, mut dst: &mut [u8]) -> Result {
         while !dst.is_empty() {
             match self.get_slice(dst.len()) {
