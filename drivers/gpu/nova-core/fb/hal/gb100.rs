@@ -78,9 +78,29 @@ fn write_sysmem_flush_page_gb100(hshub0: Mmio<'_, regs::Hshub0Registers>, addr: 
     hshub0.write_reg(regs::NV_PFB_HSHUB_EG_PCIE_FLUSH_SYSMEM_ADDR_LO::zeroed().with_adr(addr_lo));
 }
 
-// This PMU reservation size is r570-specific.
+/// PMU backing store, `kpmuReservedMemoryBackingStoreSizeGet` in OpenRM for the chipsets whose
+/// PMU initializes itself: 9 MiB + 320 KiB.
+const PMU_BACKING_STORE_SIZE: usize = 0x95_0000;
+
+/// PMU surfaces, `kpmuReservedMemorySurfacesSizeGet` in OpenRM.
+const PMU_SURFACES_SIZE: usize = SZ_16M + SZ_256K;
+
+/// Miscellaneous PMU memory.
+const PMU_MISC_SIZE: usize = SZ_4K;
+
+/// Alignment of the PMU reserved region, `KPMU_RESERVED_MEMORY_ALIGNMENT` in OpenRM.
+const PMU_RESERVED_MEMORY_ALIGNMENT: Alignment = Alignment::new::<SZ_128K>();
+
+/// PMU region above FRTS: the backing store, the surfaces and the miscellaneous memory, aligned to
+/// [`PMU_RESERVED_MEMORY_ALIGNMENT`].
+const PMU_RESERVED_SIZE: usize = const_align_up(
+    PMU_BACKING_STORE_SIZE + PMU_SURFACES_SIZE + PMU_MISC_SIZE,
+    PMU_RESERVED_MEMORY_ALIGNMENT,
+)
+.unwrap();
+
 pub(super) const fn pmu_reserved_size_gb100() -> u32 {
-    cv!(const_align_up(SZ_8M + SZ_16M + SZ_4K, Alignment::new::<SZ_128K>()).unwrap())
+    cv!(PMU_RESERVED_SIZE)
 }
 
 impl FbHal for Gb100 {

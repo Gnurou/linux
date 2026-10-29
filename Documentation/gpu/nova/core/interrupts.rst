@@ -448,10 +448,10 @@ thread to drain the queue::
 A halt and a posted message can be pending together, so the top half services
 every cause that the status reports.
 
-A drain fails when a message's framing or checksum is bad (see "Draining the
-GSP-to-CPU queue"). The message stays at the queue head, so every later drain
-would fail the same way, and the IRQ thread disables vector 155 and logs the
-failure, which leaves the queue unserviced until the device is reset.
+A drain fails when an element's framing is bad (see "Draining the GSP-to-CPU
+queue"). The element stays at the queue head, so every later drain would fail
+the same way, and the IRQ thread disables vector 155 and logs the failure,
+which leaves the queue unserviced until the device is reset.
 
 The handler, the self-test, and the rest of the driver read BAR0 through one
 shared mapping. nova-core unregisters an interrupt handler when the device
@@ -566,29 +566,33 @@ unloads the GSP.
 Draining the GSP-to-CPU queue
 -----------------------------
 
-The queue carries command replies and unsolicited events, and a message's
-function code says which it is.
+The queue carries RPC messages and GMC messages. GMC is the GPU Management
+Controller, and its API is ABI-stable. Every element opens with the same queue
+element header, which holds the MCTP and NVDM headers, and the NVDM type in
+that header selects which kind of message header follows. An RPC message is a
+command reply or an unsolicited event, and the two differ in the function code.
 
 * A function code that matches the awaited reply: the message is decoded and
   returned to the caller that sent the command.
-* Anything else is an event. An OS error record and a robust-channel record
-  are logged at error level, and an unrecognized function code at warning
-  level. The other known events (GSP logs, libos prints, assertion records,
-  lifecycle notices) need no action and get no line of their own, because the
-  receive trace at debug level already records every message's arrival with
-  its sequence number, function code, and length.
+* Any other RPC message is an event. An OS error record and a robust-channel
+  record are logged at error level, and an unrecognized function code at
+  warning level. The other known events (GSP logs, LIBOS prints, assertion
+  records, lifecycle notices) need no action and get no line of their own,
+  because the receive trace at debug level already records every message's
+  arrival with its sequence number, function code, and length.
+* A GMC message carries a command id in place of a function code. Only the
+  ``GSP_INIT`` wait during boot claims GMC messages, so one that arrives
+  anywhere else is logged at warning level and dropped.
 
-The sequence number takes no part in the match, because the GSP does not echo
-the command's sequence number on every reply. On r570 the reply to
-``UnloadingGuestDriver`` carries sequence 0.
+The RPC sequence number takes no part in the match.
 
-The read pointer advances past every message that passes framing and checksum
-validation, whether it matched or was an event.
+The read pointer advances past every message that passes framing validation,
+whether it matched or was an event.
 
-A message's length is inside the region that the checksum covers, so once the
-framing or the checksum fails there is no trustworthy length with which to skip
-the message. Such a message stays at the queue head, and every later receive
-fails on it with ``EIO`` until the device is reset.
+An element that fails framing validation, or that carries an NVDM type that the
+queue does not use, has no trustworthy length with which to skip it. Such an
+element stays at the queue head, and every later receive fails on it with
+``EIO`` until the device is reset.
 
 The polling path and the IRQ thread both read the queue under the command-queue
 mutex. Replies and events share one queue and one read pointer, so one lock is

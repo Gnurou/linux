@@ -23,7 +23,8 @@ use crate::{
             GmcCommandId, //
         },
     },
-    sbuffer::SBufferIter,
+    mctp::NvdmType,
+    sbuffer::SBufferIter, //
 };
 
 use super::{
@@ -109,6 +110,8 @@ where
     C: CommandToGsp,
     Error: From<C::InitError>,
 {
+    const NVDM_TYPE: NvdmType = NvdmType::GmcApi;
+
     fn size(&self) -> usize {
         size_of::<GmcApiHeader>() + self.0.size()
     }
@@ -116,7 +119,7 @@ where
     fn write(&self, dev: &device::Device, seq: u32, dst: &mut GspCommand<'_>) -> Result {
         let command = &self.0;
         let payload_size = command.size();
-        // Extract the areas for the GMC API header and the command itself. The GSP message
+        // Extract the areas for the GMC API header and the command itself. The queue element
         // header, the GMC API header and the command header together are guaranteed to fit
         // entirely into a single page, so it's ok to only look at `dst.contents.0` here.
         let (header, contents) = GmcApiHeader::from_bytes_mut_prefix(dst.contents.0).ok_or(EIO)?;
@@ -179,20 +182,20 @@ pub(crate) struct GmcMessage<'a> {
 }
 
 impl<'a> GmcMessage<'a> {
-    /// Validate the GMC layer of `element` and returns its GMC API header and its contents trimmed
-    /// down to the GMC payload.
+    /// Validate the GMC layer of `element` and returns its GMC API header and its contents, the
+    /// GMC payload.
     ///
     /// # Errors
     ///
-    /// - `EIO` if the element is shorter than the GMC API header, or than the payload length
-    ///   advertised by the GMC API header.
+    /// - `EIO` if the element is shorter than the GMC API header, or if the payload length that
+    ///   the GMC API header advertises differs from the one that the queue element header does.
     pub(super) fn parse(dev: &device::Device, element: GspMessage<'a>) -> Result<GmcMessage<'a>> {
         let GspMessage {
             contents: (slice_1, slice_2),
             ..
         } = element;
 
-        // The GSP message header and the GMC API header together are guaranteed to fit entirely
+        // The queue element header and the GMC API header together are guaranteed to fit entirely
         // into a single page, so it's ok to only look at `slice_1` here.
         let (gmc_header, slice_1) = GmcApiHeader::from_bytes_prefix(slice_1).ok_or(EIO)?;
         let payload_size = gmc_header.payload_size();
@@ -205,23 +208,18 @@ impl<'a> GmcMessage<'a> {
             payload_size,
         );
 
-        // Check that the driver read area is large enough for the message.
-        if slice_1.len() + slice_2.len() < payload_size {
+        // GSP-RM writes both lengths from the same payload, so a difference means that one of the
+        // two headers is corrupt, and the driver cannot know which.
+        let contents_len = slice_1.len() + slice_2.len();
+        if contents_len != payload_size {
+            dev_err!(
+                dev,
+                "GSP GMC: payload is {} bytes in the queue element header but {} in the GMC API header\n",
+                contents_len,
+                payload_size,
+            );
             return Err(EIO);
         }
-
-        // Cut the message slices down to the actual length of the message.
-        let (slice_1, slice_2) = if slice_1.len() > payload_size {
-            // PANIC: we checked above that `slice_1` is at least as long as `payload_size`.
-            (slice_1.split_at(payload_size).0, &slice_2[0..0])
-        } else {
-            (
-                slice_1,
-                // PANIC: we checked above that `slice_1.len() + slice_2.len()` is at least as
-                // large as `payload_size`.
-                slice_2.split_at(payload_size - slice_1.len()).0,
-            )
-        };
 
         Ok(GmcMessage {
             header: gmc_header,
@@ -364,8 +362,8 @@ impl CmdqInner<'_> {
     ///
     /// - `ETIMEDOUT` if the reply does not arrive before the deadline, however many other messages
     ///   arrive while waiting.
-    /// - `EIO` if a message fails framing or checksum validation, or if the reply carries a status
-    ///   other than `NV_OK`.
+    /// - `EIO` if a message fails framing validation, or if the reply carries a status other than
+    ///   `NV_OK`.
     ///
     /// Error codes returned by [`MessageFromGsp::read`] and by `on_event` are propagated as-is.
     fn await_gmc_reply<R: MessageFromGsp>(

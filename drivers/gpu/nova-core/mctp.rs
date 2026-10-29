@@ -73,7 +73,6 @@ impl MctpHeader {
     }
 
     /// Returns whether this header carries the MCTP version this driver uses.
-    #[expect(dead_code)]
     pub(crate) fn has_expected_version(self) -> bool {
         u32::from(self.version()) == Self::VERSION
     }

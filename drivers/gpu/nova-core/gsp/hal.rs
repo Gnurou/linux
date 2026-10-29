@@ -60,7 +60,6 @@ pub(super) trait GspHal: Send {
     /// # Errors
     ///
     /// Errors from loading the bootloader image are propagated as-is.
-    #[expect(dead_code)]
     fn generic_bootloader(
         &self,
         _dev: &device::Device<device::Bound>,
@@ -68,19 +67,6 @@ pub(super) trait GspHal: Send {
         _gsp_falcon: &Falcon<'_, GspEngine>,
     ) -> Result<Option<GenericBootloader>> {
         Ok(None)
-    }
-
-    /// Performs HAL-specific post-GSP boot tasks.
-    ///
-    /// This method is called by the GSP boot code after the GSP is confirmed to be running, and
-    /// after the initialization commands have been pushed onto its queue.
-    fn post_boot(
-        &self,
-        _gsp: &Gsp<'_>,
-        _ctx: &mut GspBootContext<'_, '_>,
-        _gsp_fw: &GspFirmware<'_>,
-    ) -> Result {
-        Ok(())
     }
 }
 

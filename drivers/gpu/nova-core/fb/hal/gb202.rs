@@ -72,9 +72,9 @@ impl FbHal for Gb202 {
     }
 
     fn non_wpr_heap_size(&self) -> u64 {
-        // Non-WPR heap for GB20x (see Open RM: kgspGetNonWprHeapSize, GB202+).
-        // This size is r570-specific.
-        u64::SZ_2M + u64::SZ_128K
+        // Non-WPR heap for GB20x (see OpenRM: kgspGetNonWprHeapSize, GB202+). This size is
+        // r000-specific.
+        3 * u64::SZ_1M
     }
 
     fn frts_size(&self) -> u64 {

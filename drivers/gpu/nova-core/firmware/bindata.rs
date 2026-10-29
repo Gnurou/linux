@@ -26,7 +26,6 @@ pub(crate) struct UcodesImage<'a> {
     radix3: Pin<KBox<Radix3<'a>>>,
 }
 
-#[expect(dead_code)]
 impl<'a> UcodesImage<'a> {
     /// Loads the ucodes image that the `ucodes` metadata file names, and maps it for `dev`.
     ///

@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
-// Nothing sends a GMC command before the switch to the r000 firmware, so the module is built as
-// dead code until then.
-#[expect(dead_code)]
 pub(crate) mod gmc;
-pub(crate) mod rpc;
 
 use core::{
     ffi::FromBytesUntilNulError,
@@ -15,8 +11,7 @@ use core::{
 
 use kernel::prelude::*;
 
-/// The static GPU configuration, which GSP-RM reports in reply to
-/// [`GetGspStaticInfo`](rpc::GetGspStaticInfo).
+/// The static GPU configuration, which GSP-RM reports in reply to [`GspInit`](gmc::GspInit).
 pub struct GspStaticInfo {
     gpu_name: [u8; Self::MAX_GPU_NAME_LEN],
     gpu_short_name: [u8; Self::MAX_GPU_NAME_LEN],

@@ -27,7 +27,8 @@ use crate::{
             RpcMessageHeader, //
         },
     },
-    sbuffer::SBufferIter,
+    mctp::NvdmType,
+    sbuffer::SBufferIter, //
 };
 
 use super::{
@@ -93,8 +94,8 @@ pub(crate) trait CommandToGsp {
         Ok(())
     }
 
-    /// Total size of the command (including its variable-length payload) without the
-    /// [`GspMsgElement`] header.
+    /// Total size of the command (including its variable-length payload) without the queue element
+    /// and RPC headers.
     fn size(&self) -> usize {
         size_of::<Self::Command>() + self.variable_payload_len()
     }
@@ -111,25 +112,25 @@ where
     M: CommandToGsp,
     Error: From<M::InitError>,
 {
+    const NVDM_TYPE: NvdmType = NvdmType::RmRpc;
+
     fn size(&self) -> usize {
-        self.0.size()
+        size_of::<RpcMessageHeader>() + self.0.size()
     }
 
     fn write(&self, dev: &device::Device, seq: u32, dst: &mut GspCommand<'_>) -> Result {
         let command = &self.0;
         let size_in_bytes = command.size();
-        // Extract area for the command itself. The GSP message header and the command header
-        // together are guaranteed to fit entirely into a single page, so it's ok to only look
-        // at `dst.contents.0` here.
-        let (cmd, payload_1) = M::Command::from_bytes_mut_prefix(dst.contents.0).ok_or(EIO)?;
+        // Extract the areas for the RPC header and the command itself. The queue element header,
+        // the RPC header and the command header together are guaranteed to fit entirely into a
+        // single page, so it's ok to only look at `dst.contents.0` here.
+        let (rpc_header, contents) =
+            RpcMessageHeader::from_bytes_mut_prefix(dst.contents.0).ok_or(EIO)?;
+        let (cmd, payload_1) = M::Command::from_bytes_mut_prefix(contents).ok_or(EIO)?;
         let rpc_header_init = RpcMessageHeader::init(size_in_bytes, M::FUNCTION);
-        // SAFETY: `dst.header.rpc_header_mut()` is a valid reference, and is not touched if the
-        // initializer fails.
+        // SAFETY: `rpc_header` is a valid reference, and is not touched if the initializer fails.
         unsafe {
-            pin_init::raw_try_init(
-                core::ptr::from_mut(dst.header.rpc_header_mut()),
-                rpc_header_init,
-            )?;
+            pin_init::raw_try_init(core::ptr::from_mut(rpc_header), rpc_header_init)?;
         }
         // SAFETY: `cmd` is a valid reference, and is not touched if the initializer fails.
         unsafe {
@@ -196,14 +197,17 @@ impl<'a> RpcMessage<'a> {
     ///
     /// # Errors
     ///
-    /// - `EIO` if the element is shorter than the payload length advertised by the RPC header.
+    /// - `EIO` if the element is shorter than the RPC header, or than the payload length
+    ///   advertised by the RPC header.
     pub(super) fn parse(dev: &device::Device, element: GspMessage<'a>) -> Result<RpcMessage<'a>> {
         let GspMessage {
-            header,
             contents: (slice_1, slice_2),
+            ..
         } = element;
 
-        let rpc_header = header.rpc_header();
+        // The queue element header and the RPC header together are guaranteed to fit entirely
+        // into a single page, so it's ok to only look at `slice_1` here.
+        let (rpc_header, slice_1) = RpcMessageHeader::from_bytes_prefix(slice_1).ok_or(EIO)?;
         let payload_length = rpc_header.rpc_length();
 
         dev_dbg!(
@@ -324,7 +328,7 @@ impl Cmdq<'_> {
     ///
     /// - `ETIMEDOUT` if the event does not arrive within [`Self::RECEIVE_TIMEOUT`] of the call,
     ///   however many other events arrive while waiting.
-    /// - `EIO` if a message fails framing or checksum validation.
+    /// - `EIO` if a message fails framing validation.
     ///
     /// Error codes returned by [`MessageFromGsp::read`] are propagated as-is.
     pub(crate) fn await_rpc_msg<M: MessageFromGsp>(&self) -> Result<M>
@@ -378,7 +382,7 @@ impl CmdqInner<'_> {
     ///
     /// - `ETIMEDOUT` if no message of type `M` arrives before the deadline, however many other
     ///   messages arrive while waiting.
-    /// - `EIO` if a message fails framing or checksum validation.
+    /// - `EIO` if a message fails framing validation.
     ///
     /// Error codes returned by [`MessageFromGsp::read`] are propagated as-is.
     fn await_rpc_msg<M: MessageFromGsp>(&mut self) -> Result<M>

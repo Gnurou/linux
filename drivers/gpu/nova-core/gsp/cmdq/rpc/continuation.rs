@@ -13,15 +13,19 @@ use super::{
 
 use crate::{
     gsp::fw::{
-        GspMsgElement,
         MsgFunction,
+        QueueElementHeader,
+        RpcMessageHeader,
         GSP_MSG_QUEUE_ELEMENT_SIZE_MAX, //
     },
     sbuffer::SBufferIter,
 };
 
-/// Maximum command size that fits in a single queue element.
-const MAX_CMD_SIZE: usize = GSP_MSG_QUEUE_ELEMENT_SIZE_MAX - size_of::<GspMsgElement>();
+/// Maximum command size that fits in a single queue element, after the queue element header and
+/// the RPC header.
+const MAX_CMD_SIZE: usize = GSP_MSG_QUEUE_ELEMENT_SIZE_MAX
+    - size_of::<QueueElementHeader>()
+    - size_of::<RpcMessageHeader>();
 
 /// Acts as an iterator over the continuation records for a split command.
 pub(super) struct ContinuationRecords {
