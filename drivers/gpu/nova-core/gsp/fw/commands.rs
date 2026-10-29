@@ -273,6 +273,36 @@ impl PowerStateLevel {
     }
 }
 
+/// Set in [`GspSuspend::flags`] when the suspend is a power management transition (S3 or
+/// hibernate) rather than a full unload.
+const GMCAPI_GSP_SUSPEND_FLAGS_PM_TRANSITION: u64 = 1 << 0;
+
+/// Payload of the `GSP_SUSPEND` GMC command.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Zeroable)]
+pub(crate) struct GspSuspend {
+    flags: u64,
+}
+
+impl GspSuspend {
+    /// Creates a `GSP_SUSPEND` payload for the given [`PowerStateLevel`].
+    pub(crate) fn new(level: PowerStateLevel) -> Self {
+        Self {
+            flags: if level.is_power_transition() {
+                GMCAPI_GSP_SUSPEND_FLAGS_PM_TRANSITION
+            } else {
+                0
+            },
+        }
+    }
+}
+
+// SAFETY: The single field is an integer type, and the struct has no padding.
+unsafe impl AsBytes for GspSuspend {}
+
+// SAFETY: The single field is an integer type for which all bit patterns are valid.
+unsafe impl FromBytes for GspSuspend {}
+
 /// Payload of the `UnloadingGuestDriver` command and message.
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Zeroable)]
