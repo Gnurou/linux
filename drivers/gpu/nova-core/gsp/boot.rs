@@ -39,8 +39,12 @@ use crate::{
         gsp::GspFirmware, //
     },
     gsp::{
-        cmdq::Cmdq,
-        commands, //
+        cmdq::{
+            gmc::GmcMessage,
+            Cmdq, //
+        },
+        commands,
+        fw::GmcCommandId, //
     },
     regs,
     sbuffer::SBufferIter, //
@@ -62,8 +66,40 @@ struct LoadExecContext<'a, 'gpu> {
     libos_dma_handle: u64,
 }
 
-#[expect(dead_code)]
 impl LoadExecContext<'_, '_> {
+    /// Runs the load-and-execute handler that the command id of `event` names on its payload, and
+    /// then runs the core resume.
+    ///
+    /// # Errors
+    ///
+    /// - `EINVAL` if the command id of `event` is not a load-and-execute command.
+    ///
+    /// Errors from the handlers and from [`Self::core_resume`] are propagated as-is.
+    #[expect(dead_code)]
+    fn dispatch_gmc_boot_event(&self, event: &GmcMessage<'_>) -> Result {
+        let command = event.header().command();
+
+        let handled = match command.id() {
+            Ok(GmcCommandId::ExecGenericBootloader) => {
+                self.handle_load_exec_bootloader(event.payload())
+            }
+            Ok(GmcCommandId::ExecHsBinary) => self.handle_load_exec_hs_binary(event.payload()),
+            _ => {
+                dev_err!(self.dev, "Unexpected GMC boot event: {:?}\n", command);
+                return Err(EINVAL);
+            }
+        };
+
+        handled.and_then(|()| self.core_resume()).inspect_err(|e| {
+            dev_err!(
+                self.dev,
+                "GMC boot event {:?} failed: {:?}\n",
+                command.id(),
+                e
+            );
+        })
+    }
+
     /// Waits until GSP-RM has suspended the RISC-V core, then resets the GSP falcon and its DMA
     /// registers.
     ///
