@@ -221,7 +221,7 @@ impl<'gsp> Gsp<'gsp> {
     }
 
     /// Query the GSP for the static GPU information.
-    pub(crate) fn get_static_info(&self) -> Result<commands::rpc::GetGspStaticInfoReply> {
+    pub(crate) fn get_static_info(&self) -> Result<commands::GspStaticInfo> {
         self.cmdq.send_rpc_command(commands::rpc::GetGspStaticInfo)
     }
 }

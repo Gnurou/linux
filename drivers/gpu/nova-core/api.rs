@@ -18,7 +18,7 @@ pub use crate::gpu::Spec;
 use crate::{
     driver,
     gpu::Gpu,
-    gsp::commands::rpc::GetGspStaticInfoReply, //
+    gsp::commands::GspStaticInfo, //
 };
 
 /// API handle for the auxiliary bus child drivers to interact with nova-core.
@@ -34,8 +34,8 @@ impl NovaCoreApi<'_> {
         NovaCoreApiHandle::of(adev)
     }
 
-    /// Returns the GPU [`GetGspStaticInfoReply`].
-    pub fn gsp_static_info(&self) -> &GetGspStaticInfoReply {
+    /// Returns the GPU [`GspStaticInfo`].
+    pub fn gsp_static_info(&self) -> &GspStaticInfo {
         &self.gpu.gsp_static_info
     }
 
