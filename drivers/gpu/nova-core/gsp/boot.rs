@@ -21,6 +21,16 @@ use crate::{
     },
 };
 
+/// Returns `true` if GSP-RM has suspended the RISC-V core of `gsp_falcon`.
+///
+/// GSP-RM reports a suspend through a bit of the falcon's `MAILBOX0` register, rather than
+/// through the halted bit of `CPUCTL`.
+fn is_gsp_suspended(gsp_falcon: &Falcon<'_, Gsp>) -> bool {
+    const LIBOS_INTERRUPT_PROCESSOR_SUSPENDED: u32 = bits::bit_u32(31);
+
+    gsp_falcon.read_mailbox0() & LIBOS_INTERRUPT_PROCESSOR_SUSPENDED != 0
+}
+
 impl<'gsp> super::Gsp<'gsp> {
     /// Attempt to boot the GSP.
     ///
@@ -98,10 +108,9 @@ impl<'gsp> super::Gsp<'gsp> {
         cmdq.send_rpc_command(commands::rpc::UnloadingGuestDriver::new(mode))?;
 
         // Wait until GSP signals it is suspended.
-        const LIBOS_INTERRUPT_PROCESSOR_SUSPENDED: u32 = bits::bit_u32(31);
         read_poll_timeout(
-            || Ok(gsp_falcon.read_mailbox0()),
-            |&mb0| mb0 & LIBOS_INTERRUPT_PROCESSOR_SUSPENDED != 0,
+            || Ok(is_gsp_suspended(gsp_falcon)),
+            |suspended| *suspended,
             Delta::from_millis(10),
             Delta::from_secs(5),
         )
