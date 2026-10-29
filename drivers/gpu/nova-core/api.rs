@@ -36,7 +36,7 @@ impl NovaCoreApi<'_> {
 
     /// Returns the GPU [`GspStaticInfo`].
     pub fn gsp_static_info(&self) -> &GspStaticInfo {
-        &self.gpu.gsp_static_info
+        self.gpu.gsp_static_info()
     }
 
     /// Returns the GPU [`Spec`].

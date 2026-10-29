@@ -35,7 +35,6 @@ use crate::{
     gsp::{
         self,
         cmdq::Cmdq,
-        commands::GspStaticInfo,
         Gsp,
         GspBootContext, //
     },
@@ -336,8 +335,15 @@ struct GspResources<'gpu> {
     /// GSP runtime data.
     #[pin]
     gsp: Gsp<'gpu>,
-    /// GSP unload firmware bundle, if any.
-    unload_bundle: Option<gsp::UnloadBundle<'gpu>>,
+    /// The static GPU configuration and the unload bundle that the boot sequence returned.
+    boot_result: gsp::BootResult<'gpu>,
+}
+
+impl GspResources<'_> {
+    /// Returns the static GPU configuration that GSP-RM reported at boot.
+    fn static_info(&self) -> &gsp::commands::GspStaticInfo {
+        &self.boot_result.static_info
+    }
 }
 
 /// The GSP event handler's registration and the enable of its subtree at `TOP`.
@@ -387,8 +393,6 @@ pub(crate) struct Gpu<'gpu> {
     /// falcon that it reads are freed, and before the GSP is unloaded.
     #[pin]
     _gsp_subtree: GspSubtree<'gpu>,
-    /// Static GPU information as provided by the GSP.
-    pub(crate) gsp_static_info: GspStaticInfo,
     /// GPU memory manager owning memory management resources.
     ///
     /// Must be kept declared *before* `gsp_resources`, so that its components are dropped while
@@ -422,7 +426,7 @@ impl PinnedDrop for GspResources<'_> {
         let this = self.project();
         let device = *this.device;
         let bar = *this.bar;
-        let bundle = this.unload_bundle.take();
+        let bundle = this.boot_result.unload_bundle.take();
 
         let _ = this
             .gsp
@@ -501,10 +505,10 @@ impl<'gpu> Gpu<'gpu> {
 
                 gsp <- Gsp::new(pdev, bar),
 
-                // This member must be initialized last, so the `UnloadBundle` can never be dropped
-                // from outside of the constructed `GspResources`, ensuring that the unload sequence
-                // is properly run in case of failure.
-                unload_bundle: gsp.boot(GspBootContext {
+                // This member must be initialized last, so that the unload bundle can never be
+                // dropped from outside the constructed `GspResources`, and the unload sequence runs
+                // on a failure.
+                boot_result: gsp.boot(GspBootContext {
                     pdev,
                     bar,
                     chipset: spec.chipset,
@@ -538,9 +542,8 @@ impl<'gpu> Gpu<'gpu> {
                 gsp_resources.gsp.cmdq.drain()?;
             },
 
-            gsp_static_info: {
-                // Obtain and display basic GPU information.
-                let info = gsp_resources.gsp.get_static_info()?;
+            _: {
+                let info = gsp_resources.static_info();
                 match info.gpu_name() {
                     Ok(name) => dev_info!(dev, "GPU name: {}\n", name),
                     Err(e) => dev_warn!(dev, "GPU name unavailable: {:?}\n", e),
@@ -558,13 +561,12 @@ impl<'gpu> Gpu<'gpu> {
                         info.vram_size() / u64::SZ_1M
                     );
                 }
-
-                info
             },
 
             // Create GPU memory manager owning memory management resources.
             mm: {
-                let usable_vram = gsp_static_info.usable_fb_regions.first().ok_or(ENODEV)?;
+                let info = gsp_resources.static_info();
+                let usable_vram = info.usable_fb_regions.first().ok_or(ENODEV)?;
                 let buddy_params = GpuBuddyParams {
                     base_offset: usable_vram.start,
                     size: usable_vram.end - usable_vram.start,
@@ -575,13 +577,13 @@ impl<'gpu> Gpu<'gpu> {
                     bar,
                     gsp_resources.spec.chipset,
                     buddy_params,
-                    VramAddress::from_raw(gsp_static_info.total_fb_end),
+                    VramAddress::from_raw(info.total_fb_end),
                 )?
             },
 
             // Create BAR1 user interface for CPU access to GPU virtual memory.
             bar_user <- {
-                let pdb_addr = VramAddress::from_raw(gsp_static_info.bar1_pde_base);
+                let pdb_addr = VramAddress::from_raw(gsp_resources.static_info().bar1_pde_base);
                 let bar1_idx = crate::driver::bar1_resource_index(pdev)?;
                 let bar1_size = pdev.resource_len(bar1_idx)?;
 
@@ -593,6 +595,11 @@ impl<'gpu> Gpu<'gpu> {
                 )
             },
         })
+    }
+
+    /// Returns the static GPU configuration that GSP-RM reported at boot.
+    pub(crate) fn gsp_static_info(&self) -> &gsp::commands::GspStaticInfo {
+        self.gsp_resources.static_info()
     }
 
     /// Waits for GFW, the GPU's boot firmware, to report completion.
@@ -617,14 +624,14 @@ impl<'gpu> Gpu<'gpu> {
     pub(crate) fn run_selftests(self: Pin<&mut Self>, pdev: &pci::Device<device::Bound>) {
         let this = self.project();
         let dev = pdev.as_ref();
-        let regions = &this.gsp_static_info.usable_fb_regions;
+        let info = this.gsp_resources.static_info();
 
         if let Err(err) = crate::mm::selftest::run(
             dev,
             this.mm,
-            regions,
+            &info.usable_fb_regions,
             &this.bar_user,
-            this.gsp_static_info.bar1_pde_base,
+            info.bar1_pde_base,
             this.spec.chipset,
         ) {
             dev_err!(dev, "self-tests failed: {:?}\n", err);
