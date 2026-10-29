@@ -584,7 +584,12 @@ command reply or an unsolicited event, and the two differ in the function code.
   ``GSP_INIT`` wait during boot claims GMC messages, so one that arrives
   anywhere else is logged at warning level and dropped.
 
-The RPC sequence number takes no part in the match.
+A command's reply must carry the RPC sequence number that nova-core wrote into
+the command, as well as its function code. A message with the awaited function
+code and a different sequence number is a stale reply to a command that already
+timed out, so it is logged at warning level and dropped rather than classified
+as an event. An unsolicited event answers no command, so a caller awaiting one
+matches on the function code alone.
 
 The read pointer advances past every message that passes framing validation,
 whether it matched or was an event.

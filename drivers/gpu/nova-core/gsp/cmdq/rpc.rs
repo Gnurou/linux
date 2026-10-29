@@ -127,7 +127,7 @@ where
         let (rpc_header, contents) =
             RpcMessageHeader::from_bytes_mut_prefix(dst.contents.0).ok_or(EIO)?;
         let (cmd, payload_1) = M::Command::from_bytes_mut_prefix(contents).ok_or(EIO)?;
-        let rpc_header_init = RpcMessageHeader::init(size_in_bytes, M::FUNCTION);
+        let rpc_header_init = RpcMessageHeader::init(seq, size_in_bytes, M::FUNCTION);
         // SAFETY: `rpc_header` is a valid reference, and is not touched if the initializer fails.
         unsafe {
             pin_init::raw_try_init(core::ptr::from_mut(rpc_header), rpc_header_init)?;
@@ -274,7 +274,8 @@ impl<'a> RpcMessage<'a> {
 impl Cmdq<'_> {
     /// Sends `command` to the GSP and waits for the reply.
     ///
-    /// Events that arrive before the reply are logged and consumed.
+    /// The reply must carry the function code of the command and the sequence number that it was
+    /// sent with. Events that arrive before the reply are logged and consumed.
     ///
     /// The queue is locked for the entire send+receive cycle to ensure that no other command can
     /// be interleaved.
@@ -296,9 +297,9 @@ impl Cmdq<'_> {
         Error: From<<M::Reply as MessageFromGsp>::InitError>,
     {
         let mut inner = self.inner.lock();
-        inner.send_rpc_command(command)?;
+        let seq = inner.send_rpc_command(command)?;
 
-        inner.await_rpc_msg()
+        inner.await_rpc_msg(Some(seq))
     }
 
     /// Sends `command` to the GSP without waiting for a reply.
@@ -315,11 +316,13 @@ impl Cmdq<'_> {
         M: CommandToGsp<Reply = NoReply>,
         Error: From<M::InitError>,
     {
-        self.inner.lock().send_rpc_command(command)
+        self.inner.lock().send_rpc_command(command).map(|_| ())
     }
 
     /// Waits for an unsolicited GSP event of type `M`. Events that arrive before it are logged and
     /// consumed.
+    ///
+    /// The event answers no command, so it is matched on its function code alone.
     ///
     /// The queue mutex is held for the whole wait, up to [`Self::RECEIVE_TIMEOUT`], so no other
     /// caller can send a command or consume an event meanwhile.
@@ -336,14 +339,16 @@ impl Cmdq<'_> {
         // This allows all error types, including `Infallible`, to be used for `M::InitError`.
         Error: From<M::InitError>,
     {
-        self.inner.lock().await_rpc_msg()
+        self.inner.lock().await_rpc_msg(None)
     }
 }
 
 impl CmdqInner<'_> {
-    /// Sends `command` to the GSP.
+    /// Sends `command` to the GSP, and returns the sequence number of its first element.
     ///
-    /// The command may be split into multiple messages if it is large.
+    /// The command may be split into multiple messages if it is large. Each message carries its
+    /// own sequence number, and GSP-RM copies the one of the first message into its reply, as it
+    /// does for OpenRM's large RPCs.
     ///
     /// # Errors
     ///
@@ -352,28 +357,30 @@ impl CmdqInner<'_> {
     ///   written to by its [`CommandToGsp::init_variable_payload`] method.
     ///
     /// Error codes returned by the command initializers are propagated as-is.
-    fn send_rpc_command<M>(&mut self, command: M) -> Result
+    fn send_rpc_command<M>(&mut self, command: M) -> Result<u32>
     where
         M: CommandToGsp,
         Error: From<M::InitError>,
     {
         match SplitState::new(command)? {
-            SplitState::Single(command) => self
-                .send_command_element(RpcCommandElement(command))
-                .map(|_| ()),
+            SplitState::Single(command) => self.send_command_element(RpcCommandElement(command)),
             SplitState::Split(command, mut continuations) => {
-                self.send_command_element(RpcCommandElement(command))?;
+                let seq = self.send_command_element(RpcCommandElement(command))?;
 
                 while let Some(continuation) = continuations.next() {
                     self.send_command_element(RpcCommandElement(continuation))?;
                 }
 
-                Ok(())
+                Ok(seq)
             }
         }
     }
 
     /// Receives a message of type `M`, waiting up to [`Cmdq::RECEIVE_TIMEOUT`] from the call.
+    ///
+    /// With `expected_seq` set, the message must carry that sequence number too. A message with
+    /// the expected function code and a different sequence is a stale reply to a command that
+    /// already timed out, so it is logged and dropped rather than classified as an event.
     ///
     /// Any other message that arrives first is logged as an event and does not extend the
     /// deadline.
@@ -385,7 +392,7 @@ impl CmdqInner<'_> {
     /// - `EIO` if a message fails framing validation.
     ///
     /// Error codes returned by [`MessageFromGsp::read`] are propagated as-is.
-    fn await_rpc_msg<M: MessageFromGsp>(&mut self) -> Result<M>
+    fn await_rpc_msg<M: MessageFromGsp>(&mut self, expected_seq: Option<u32>) -> Result<M>
     where
         // This allows all error types, including `Infallible`, to be used for `M::InitError`.
         Error: From<M::InitError>,
@@ -399,7 +406,9 @@ impl CmdqInner<'_> {
                 }
             };
             let function = rpc_message.header.function();
-            if matches!(function, Ok(f) if f == M::FUNCTION) {
+            let seq = rpc_message.header.sequence();
+            let func_matches = matches!(function, Ok(f) if f == M::FUNCTION);
+            if func_matches && expected_seq.is_none_or(|expected| seq == expected) {
                 let (cmd, contents_1) =
                     M::Message::from_bytes_prefix(rpc_message.contents.0).ok_or(EIO)?;
                 let mut sbuffer = SBufferIter::new_reader([contents_1, rpc_message.contents.1]);
@@ -415,6 +424,16 @@ impl CmdqInner<'_> {
                             );
                         }
                     })
+            } else if func_matches {
+                dev_warn!(
+                    self.dev,
+                    "GSP RPC: dropping stale {:?} reply (seq {}, awaiting {:?})\n",
+                    M::FUNCTION,
+                    seq,
+                    expected_seq,
+                );
+
+                Err(ENOMSG)
             } else {
                 rpc_message.log(self.dev);
 

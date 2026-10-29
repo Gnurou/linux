@@ -480,13 +480,19 @@ pub(crate) struct RpcMessageHeader {
 impl RpcMessageHeader {
     /// Creates a new RPC header.
     ///
+    /// `sequence` is the sequence number of the message, which GSP-RM copies into its reply.
     /// `cmd_size` is the size in bytes of the payload. `function` is the RPC function of the
     /// message.
-    pub(crate) fn init(cmd_size: usize, function: MsgFunction) -> impl Init<Self, Error> {
+    pub(crate) fn init(
+        sequence: u32,
+        cmd_size: usize,
+        function: MsgFunction,
+    ) -> impl Init<Self, Error> {
         let init_inner = try_init!(bindings::rpc_message_header_v {
             header_version: MsgHeaderVersion::new().into(),
             signature: bindings::NV_VGPU_MSG_SIGNATURE_VALID,
             function: function.into(),
+            sequence,
             length: size_of::<Self>()
                 .checked_add(cmd_size)
                 .ok_or(EOVERFLOW)
