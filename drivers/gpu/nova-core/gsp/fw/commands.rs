@@ -18,6 +18,7 @@ use kernel::{
 use crate::{
     gpu::Chipset,
     gsp::{
+        commands::GspStaticInfo,
         nvkv::{
             nvkv_decode,
             nvkv_encode,
@@ -330,11 +331,43 @@ impl From<HostArch> for u32 {
     }
 }
 
+impl HostArch {
+    /// Returns the variant that names the architecture for which this kernel is built.
+    fn host() -> Self {
+        if cfg!(target_arch = "x86_64") {
+            Self::X86_64
+        } else if cfg!(target_arch = "aarch64") {
+            Self::Aarch64
+        } else if cfg!(target_arch = "powerpc64") {
+            Self::Ppc64le
+        } else if cfg!(target_arch = "arm") {
+            Self::Arm
+        } else if cfg!(target_arch = "riscv64") {
+            Self::Riscv64
+        } else {
+            Self::None
+        }
+    }
+}
+
 nvkv_encode! {
     /// A GSP registry entry.
     struct RegKey {
         key_name: Key<&'static [u8], 0x3070>,
         key_value: Key<u32, 0x3071>,
+    }
+}
+
+impl RegKey {
+    /// Creates a registry entry.
+    ///
+    /// `key_name` must include its NUL terminator, which GSP-RM counts in the encoded name
+    /// length.
+    fn new(key_name: &'static [u8], key_value: u32) -> Self {
+        Self {
+            key_name: key_name.into(),
+            key_value: key_value.into(),
+        }
     }
 }
 
@@ -361,10 +394,7 @@ nvkv_encode! {
 
 nvkv_encode! {
     /// Payload of the `GSP_INIT` command.
-    // TODO: expect() doesn't work here before rustc 1.97.0
-    // https://github.com/rust-lang/rust/pull/154377
-    #[allow(dead_code)]
-    struct GspInitRequest {
+    pub(crate) struct GspInitRequest {
         pci_device_id: Key<u32, 0x0001>,
         pci_sub_device_id: Key<u32, 0x0002>,
         pci_revision_id: Key<u32, 0x0003>,
@@ -377,16 +407,92 @@ nvkv_encode! {
     }
 }
 
+bitfield! {
+    /// A PCI device id as `PCI_DEVID` packs it: the bus number and the device and function
+    /// numbers.
+    struct PciDevId(u16) {
+        15:8 bus;
+        7:3 device;
+        2:0 function;
+    }
+}
+
+bitfield! {
+    /// A GPU's PCI location, encoded as GSP-RM decodes it (`gpuEncodeDomainBusDevice` in OpenRM).
+    /// Despite the name that GSP-RM gives the key, the function number is not part of the value.
+    struct DomainBusDevice(u64) {
+        63:32 domain;
+        15:8 bus;
+        7:0 device;
+    }
+}
+
+/// Registry entries that the driver sends to GSP-RM on every boot.
+///
+/// `RMSecBusResetEnable` enables PCI secondary bus reset. `RMForcePcieConfigSave` makes GSP-RM
+/// preserve PCI configuration registers across any PCI reset. `RMDevidCheckIgnore` lets GSP-RM
+/// boot when the PCI device id is absent from its product name database.
+const REGISTRY_ENTRIES: &[(&[u8], u32)] = &[
+    (b"RMSecBusResetEnable\0", 1),
+    (b"RMForcePcieConfigSave\0", 1),
+    (b"RMDevidCheckIgnore\0", 1),
+];
+
+impl GspInitRequest {
+    /// Creates the request for `dev`.
+    ///
+    /// The registry keys are [`REGISTRY_ENTRIES`], plus `RMSetSriovMode` when `vgpu_state` reports
+    /// that vGPU is enabled.
+    ///
+    /// # Errors
+    ///
+    /// - `ENOMEM` if the registry list cannot be allocated.
+    pub(crate) fn new(
+        dev: &pci::Device<device::Bound>,
+        chipset: Chipset,
+        vgpu_state: VgpuState,
+    ) -> Result<Self> {
+        let mut regkeys = KVVec::new();
+        for &(name, value) in REGISTRY_ENTRIES {
+            regkeys.push(RegKey::new(name, value), GFP_KERNEL)?;
+        }
+        if matches!(vgpu_state, VgpuState::Enabled { .. }) {
+            regkeys.push(RegKey::new(b"RMSetSriovMode\0", 1), GFP_KERNEL)?;
+        }
+
+        let mirror = chipset.pci_config_mirror_range();
+        let dev_id = PciDevId::from(dev.dev_id());
+        let bus_device_func = DomainBusDevice::zeroed()
+            .with_domain(dev.domain_nr())
+            .with_bus(u8::from(dev_id.bus()))
+            .with_device(u8::from(dev_id.device()));
+        let device_id = (u32::from(dev.device_id()) << 16) | u32::from(dev.vendor_id().as_raw());
+        let sub_device_id =
+            (u32::from(dev.subsystem_device_id()) << 16) | u32::from(dev.subsystem_vendor_id());
+
+        Ok(Self {
+            pci_device_id: device_id.into(),
+            pci_sub_device_id: sub_device_id.into(),
+            pci_revision_id: u32::from(dev.revision_id()).into(),
+            pci_config_mirror_base: mirror.start.into(),
+            pci_config_mirror_size: (mirror.end - mirror.start).into(),
+            host_arch: HostArch::host().into(),
+            bus_device_func: u64::from(bus_device_func).into(),
+            regkeys,
+            vf_info: None,
+        })
+    }
+}
+
 // Decode:
 
 // Should decode with UnknownKeyPolicy::Ignore.
 nvkv_decode! {
     /// Schema for the `GSP_INIT` response.
-    // TODO: expect() doesn't work here before rustc 1.97.0
-    // https://github.com/rust-lang/rust/pull/154377
-    #[allow(dead_code)]
-    struct GspInitResponseSchema => GspInitResponse {
-        gpu_name: TruncatingArray<u8, { GspInitResponse::MAX_GPU_NAME_LEN }, 0x2000>,
+    pub(crate) struct GspInitResponseSchema => GspInitResponse {
+        gpu_name: TruncatingArray<u8, { GspStaticInfo::MAX_GPU_NAME_LEN }, 0x2000>,
+        gpu_short_name: TruncatingArray<u8, { GspStaticInfo::MAX_GPU_NAME_LEN }, 0x2001>,
+        gpu_gid: TruncatingArray<u8, { GspStaticInfo::GID_LEN }, 0x2002>,
         fb_regions: Accumulated<FbRegionSchema>,
         bar1_pde_base: Required<Key<u64, 0x1020>>,
         vmmu_segment_size: Key<u64, 0x1050>,
@@ -394,18 +500,70 @@ nvkv_decode! {
 }
 
 /// Payload of the `GSP_INIT` response.
-// TODO: expect() doesn't work here before rustc 1.97.0
-// https://github.com/rust-lang/rust/pull/154377
-#[allow(dead_code)]
-struct GspInitResponse {
-    gpu_name: ArrayVec<u8, { Self::MAX_GPU_NAME_LEN }>,
+pub(crate) struct GspInitResponse {
+    gpu_name: ArrayVec<u8, { GspStaticInfo::MAX_GPU_NAME_LEN }>,
+    gpu_short_name: ArrayVec<u8, { GspStaticInfo::MAX_GPU_NAME_LEN }>,
+    gpu_gid: ArrayVec<u8, { GspStaticInfo::GID_LEN }>,
     fb_regions: KVVec<FbRegion>,
     bar1_pde_base: u64,
     vmmu_segment_size: u64,
 }
 
 impl GspInitResponse {
-    const MAX_GPU_NAME_LEN: usize = 64;
+    /// Tag of a general-purpose region. Any other tag marks a region that GSP-RM reserves for the
+    /// use that the tag names.
+    const FB_REGION_TAG_NONE: u32 = 0;
+
+    /// Returns the GPU name, which GSP-RM sends with its NUL terminator.
+    pub(crate) fn gpu_name(&self) -> &[u8] {
+        self.gpu_name.as_slice()
+    }
+
+    /// Returns the short GPU name, which GSP-RM sends with its NUL terminator.
+    pub(crate) fn gpu_short_name(&self) -> &[u8] {
+        self.gpu_short_name.as_slice()
+    }
+
+    /// Returns the SHA-1 based GPU identifier (GID).
+    pub(crate) fn gpu_gid(&self) -> &[u8] {
+        self.gpu_gid.as_slice()
+    }
+
+    /// Returns an iterator over the FB regions from which the driver may allocate: the
+    /// general-purpose regions that are not protected and that support both compression and
+    /// isochronous access.
+    pub(crate) fn usable_fb_regions(&self) -> impl Iterator<Item = Range<u64>> + '_ {
+        self.fb_regions.iter().filter_map(|region| {
+            if region.limit >= region.base
+                && region.tag == Self::FB_REGION_TAG_NONE
+                && !region.flags.protected()
+                && region.flags.support_compressed()
+                && region.flags.support_iso()
+            {
+                region.limit.checked_add(1).map(|end| region.base..end)
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Returns the exclusive end of the FB physical address space, which spans every region
+    /// including the ones that [`Self::usable_fb_regions`] leaves out.
+    ///
+    /// Returns `None` if no region that GSP-RM reported has a limit at or above its base.
+    pub(crate) fn total_fb_end(&self) -> Option<u64> {
+        self.fb_regions
+            .iter()
+            .filter(|region| region.limit >= region.base)
+            .map(|region| region.limit)
+            .max()?
+            .checked_add(1)
+    }
+
+    /// Returns the BAR1 page directory entry base address.
+    pub(crate) fn bar1_pde_base(&self) -> u64 {
+        self.bar1_pde_base
+    }
 }
 
 nvkv_decode! {

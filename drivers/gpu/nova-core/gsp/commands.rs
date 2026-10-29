@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
+// Nothing sends a GMC command before the switch to the r000 firmware, so the module is built as
+// dead code until then.
+#[expect(dead_code)]
+pub(crate) mod gmc;
 pub(crate) mod rpc;
 
 use core::{
@@ -14,10 +18,10 @@ use kernel::prelude::*;
 /// The static GPU configuration, which GSP-RM reports in reply to
 /// [`GetGspStaticInfo`](rpc::GetGspStaticInfo).
 pub struct GspStaticInfo {
-    gpu_name: [u8; 64],
-    gpu_short_name: [u8; 64],
+    gpu_name: [u8; Self::MAX_GPU_NAME_LEN],
+    gpu_short_name: [u8; Self::MAX_GPU_NAME_LEN],
     /// The 16-byte SHA-1 based GPU identifier (GID) reported by GSP-RM.
-    pub gpu_gid: [u8; 16],
+    pub gpu_gid: [u8; Self::GID_LEN],
     /// BAR1 Page Directory Entry base address.
     pub(crate) bar1_pde_base: u64,
     /// Usable FB (VRAM) regions for driver memory allocation.
@@ -37,6 +41,11 @@ pub enum GpuNameError {
 }
 
 impl GspStaticInfo {
+    /// Length of the buffers holding the GPU names, NUL terminator included.
+    pub(crate) const MAX_GPU_NAME_LEN: usize = 64;
+    /// Length of the GPU identifier.
+    pub(crate) const GID_LEN: usize = 16;
+
     /// Returns the name of the GPU as a string.
     ///
     /// Returns an error if the string given by the GSP does not contain a null terminator or
