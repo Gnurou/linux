@@ -108,8 +108,9 @@ impl<'a> FwsecFirmwareWithBl<'a> {
         firmware: FwsecFirmware,
         dev: &'a Device<device::Bound>,
         chipset: Chipset,
+        falcon: &Falcon<'_, Gsp>,
     ) -> Result<Self> {
-        let bootloader = GenericBootloader::new(dev, chipset)?;
+        let bootloader = GenericBootloader::new(dev, chipset, falcon)?;
 
         // `BootloaderDmemDescV2` expects the source to be a mirror image of the destination and
         // uses the same offset parameter for both.
