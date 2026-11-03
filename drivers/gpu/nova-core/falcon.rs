@@ -131,8 +131,9 @@ pub(crate) enum FalconMem {
     /// Non-Secure Instruction Memory.
     #[expect(unused)]
     ImemNonSecure,
-    /// Data Memory.
-    Dmem,
+    /// Data Memory. If `tag` is set, a transfer into DMEM also tags each block with its source
+    /// offset, which is then the DMEM virtual address of the image.
+    Dmem { tag: bool },
 }
 
 bounded_enum! {
@@ -529,9 +530,9 @@ impl<'a, E: FalconEngine + 'static> Falcon<'a, E> {
         // code addresses in the firmware (and the boot vector) are virtual.
         //
         // For DMEM, the start offset is folded into the DMA address.
-        let (src_start, dma_start) = match target_mem {
-            FalconMem::ImemSecure | FalconMem::ImemNonSecure => (load_offsets.src_start, 0),
-            FalconMem::Dmem => (0, usize::from_safe_cast(load_offsets.src_start)),
+        let (src_start, dma_start, tag_dmem) = match target_mem {
+            FalconMem::ImemSecure | FalconMem::ImemNonSecure => (load_offsets.src_start, 0, false),
+            FalconMem::Dmem { tag } => (0, usize::from_safe_cast(load_offsets.src_start), tag),
         };
 
         let dma_address = {
@@ -568,7 +569,8 @@ impl<'a, E: FalconEngine + 'static> Falcon<'a, E> {
 
         let cmd = regs::NV_PFALCON_FALCON_DMATRFCMD::zeroed()
             .with_size(DmaTrfCmdSize::Size256B)
-            .with_falcon_mem(target_mem);
+            .with_falcon_mem(target_mem)
+            .with_set_dmtag(tag_dmem);
 
         for pos in (0..num_transfers).map(|i| i * DMA_LEN) {
             // Perform a transfer of size `DMA_LEN`.
@@ -625,7 +627,11 @@ impl<'a, E: FalconEngine + 'static> Falcon<'a, E> {
             });
 
         self.dma_wr(&dma_obj, FalconMem::ImemSecure, fw.imem_sec_load_params())?;
-        self.dma_wr(&dma_obj, FalconMem::Dmem, fw.dmem_load_params())?;
+        self.dma_wr(
+            &dma_obj,
+            FalconMem::Dmem { tag: false },
+            fw.dmem_load_params(),
+        )?;
 
         self.hal.program_brom(self, &fw.brom_params());
 

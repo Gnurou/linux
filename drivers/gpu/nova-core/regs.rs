@@ -323,7 +323,7 @@ impl NV_PFALCON_FALCON_DMACTL {
 impl NV_PFALCON_FALCON_DMATRFCMD {
     /// Programs the `imem` and `sec` fields for the given FalconMem
     pub(crate) fn with_falcon_mem(self, mem: FalconMem) -> Self {
-        let this = self.with_imem(mem != FalconMem::Dmem);
+        let this = self.with_imem(!matches!(mem, FalconMem::Dmem { .. }));
 
         match mem {
             FalconMem::ImemSecure => this.with_const_sec::<1>(),
