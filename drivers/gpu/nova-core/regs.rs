@@ -181,6 +181,11 @@ register! {
         31:0    value => u32;
     }
 
+    pub(crate) NV_PFALCON_FALCON_HWCFG(u32) @ 0x00000108 {
+        /// Number of 256-byte blocks in this falcon's IMEM.
+        8:0     imem_size;
+    }
+
     pub(crate) NV_PFALCON_FALCON_DMACTL(u32) @ 0x0000010c {
         7:7     secure_stat => bool;
         6:3     dmaq_num;
@@ -318,7 +323,7 @@ impl NV_PFALCON_FALCON_DMACTL {
 impl NV_PFALCON_FALCON_DMATRFCMD {
     /// Programs the `imem` and `sec` fields for the given FalconMem
     pub(crate) fn with_falcon_mem(self, mem: FalconMem) -> Self {
-        let this = self.with_imem(mem != FalconMem::Dmem);
+        let this = self.with_imem(!matches!(mem, FalconMem::Dmem { .. }));
 
         match mem {
             FalconMem::ImemSecure => this.with_const_sec::<1>(),
